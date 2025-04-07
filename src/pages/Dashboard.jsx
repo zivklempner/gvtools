@@ -1,22 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { ScanResult } from '@/api/entities';
-import { ImportedScan } from '@/api/entities';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from "@/utils";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ScanResult } from '@/api/entities';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -25,473 +14,442 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { format } from "date-fns";
-import { 
-  Upload, Package, Code2, Server, AlertCircle, 
-  Download, Settings, Activity, Box, Database, FileUp, Trash2, AlertTriangle
-} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  FileUp, FileDigit, Upload, ArrowUpCircle, 
+  Cpu, AlertCircle, CheckCircle2, Circle, Server,
+  BarChart3, PlusCircle, Settings, Terminal, Trash2, MoreVertical
+} from "lucide-react";
+import { format } from 'date-fns';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { 
+  DropdownMenu, DropdownMenuContent, 
+  DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenuSeparator
+} from "@/components/ui/dropdown-menu";
 
-import ImportedScansList from "../components/dashboard/ImportedScansList";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ImportedScansList } from '@/components/dashboard/ImportedScansList';
 
 export default function Dashboard() {
+  const [systems, setSystems] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const projectId = sessionStorage.getItem('currentProjectId');
   const navigate = useNavigate();
-  const [scans, setScans] = useState([]);
-  const [imports, setImports] = useState([]);
-  const [selectedScan, setSelectedScan] = useState(null);
-  const [outputFormat, setOutputFormat] = useState("json");
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deletingScan, setDeletingScan] = useState(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [systemToDelete, setSystemToDelete] = useState(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
+    if (!projectId) return;
     loadData();
-  }, []);
+  }, [projectId]);
 
   const loadData = async () => {
-    const [scanResults, importedScans] = await Promise.all([
-      ScanResult.list('-scan_date'),
-      ImportedScan.list('-import_date')
-    ]);
-    setScans(scanResults);
-    setImports(importedScans);
-    if (scanResults.length > 0 && !selectedScan) {
-      setSelectedScan(scanResults[0]);
-    }
-  };
-
-  const handleViewImportedScan = (scanResultId) => {
-    const scan = scans.find(s => s.id === scanResultId);
-    if (scan) {
-      setSelectedScan(scan);
-    }
-  };
-
-  const handleDeleteScan = async () => {
-    if (!deletingScan) return;
-    
+    setIsLoading(true);
     try {
-      setIsDeleting(true);
-      
-      // First delete any imported scan that references this scan result
-      const relatedImport = imports.find(imp => imp.scan_result_id === deletingScan.id);
-      if (relatedImport) {
-        await ImportedScan.delete(relatedImport.id);
-      }
-      
-      // Then delete the scan result itself
-      await ScanResult.delete(deletingScan.id);
-      
-      setIsDeleting(false);
-      setDeleteDialogOpen(false);
-      
-      // Reload data
-      await loadData();
-      
-      // If the deleted scan was the selected one, reset selection
-      if (selectedScan && selectedScan.id === deletingScan.id) {
-        setSelectedScan(scans.length > 0 ? scans[0] : null);
-      }
-      
-      setDeletingScan(null);
+      const results = await ScanResult.filter({ project_id: projectId }, '-scan_date');
+      setSystems(results);
     } catch (error) {
-      console.error("Error deleting scan:", error);
-      setIsDeleting(false);
+      console.error("Error loading dashboard data:", error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const getStatusColor = (status) => {
+  const getStatusBadge = (status) => {
     switch (status) {
       case 'completed':
-        return 'bg-green-100 text-green-800';
+        return (
+          <Badge className="bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300">
+            <CheckCircle2 className="w-3 h-3 mr-1" />
+            Completed
+          </Badge>
+        );
       case 'failed':
-        return 'bg-red-100 text-red-800';
+        return (
+          <Badge className="bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300">
+            <AlertCircle className="w-3 h-3 mr-1" />
+            Failed
+          </Badge>
+        );
       case 'partial':
-        return 'bg-yellow-100 text-yellow-800';
+        return (
+          <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300">
+            <Circle className="w-3 h-3 mr-1" />
+            Partial
+          </Badge>
+        );
       default:
-        return 'bg-gray-100 text-gray-800';
+        return (
+          <Badge variant="outline">
+            <Circle className="w-3 h-3 mr-1" />
+            Unknown
+          </Badge>
+        );
+    }
+  };
+  
+  const formatDistribution = (scan) => {
+    if (!scan.os_info) return 'Unknown';
+    const { name, distribution, version } = scan.os_info;
+    return distribution 
+      ? `${distribution} ${version || ''}`
+      : `${name} ${version || ''}`;
+  };
+
+  const getPackageCount = (scan) => {
+    return scan.package_managers?.reduce((total, pm) => 
+      total + (pm.packages?.length || 0), 0
+    ) || 0;
+  };
+
+  const handleSystemClick = (system) => {
+    // Store the selected system ID in session storage
+    sessionStorage.setItem('selectedSystemId', system.id);
+    // Navigate to the Graviton Compatibility page with the scanId parameter
+    navigate(createPageUrl(`GravitonCompatibility?scanId=${system.id}`));
+  };
+
+  const handleDeleteSystem = async () => {
+    if (!systemToDelete) return;
+
+    try {
+      await ScanResult.delete(systemToDelete.id);
+      // Clear from session storage if it's the selected system
+      if (sessionStorage.getItem('selectedSystemId') === systemToDelete.id) {
+        sessionStorage.removeItem('selectedSystemId');
+      }
+      // Reload the systems list
+      loadData();
+      setShowDeleteDialog(false);
+      setSystemToDelete(null);
+    } catch (error) {
+      console.error("Error deleting system:", error);
     }
   };
 
-  const formatSize = (bytes) => {
-    if (bytes < 1024) return bytes + ' B';
-    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    else return (bytes / 1048576).toFixed(1) + ' MB';
-  };
-
-  const startNewScan = () => {
-    navigate(createPageUrl("Import"));
-  };
+  if (!projectId) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="text-center p-8">
+          <h1 className="text-3xl font-bold mb-4">Welcome to GVTools</h1>
+          <p className="mb-8 text-gray-500">Please select or create a project to get started</p>
+          <Link to={createPageUrl("Projects")}>
+            <Button size="lg" className="bg-blue-600 hover:bg-blue-700">
+              Go to Projects
+            </Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold">GVTools</h1>
-          <p className="text-gray-500 dark:text-gray-400">Advanced Software Bill of Materials Scanner</p>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-gray-500">Project overview and system analysis</p>
         </div>
-        <div className="flex gap-3">
-          <Select value={outputFormat} onValueChange={setOutputFormat}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Select format" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="json">JSON Format</SelectItem>
-              <SelectItem value="yaml">YAML Format</SelectItem>
-              <SelectItem value="cyclonedx">CycloneDX</SelectItem>
-              <SelectItem value="spdx">SPDX Format</SelectItem>
-              <SelectItem value="csv">CSV Format</SelectItem>
-            </SelectContent>
-          </Select>
-          <div className="flex gap-2">
-            <Link to={createPageUrl("Import")}>
-              <Button variant="outline">
-                <FileUp className="mr-2 h-4 w-4" />
-                Import Syft
+        <div className="flex gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="bg-blue-600 hover:bg-blue-700">
+                <PlusCircle className="w-4 h-4 mr-2" />
+                Add New System
               </Button>
-            </Link>
-            <Button 
-              className="bg-blue-600 hover:bg-blue-700"
-              onClick={startNewScan}
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              New Scan
-            </Button>
-          </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <Link to={createPageUrl("ScanConfiguration")}>
+                <DropdownMenuItem className="cursor-pointer">
+                  <Terminal className="w-4 h-4 mr-2" />
+                  Remote System Scan
+                </DropdownMenuItem>
+              </Link>
+              <Link to={createPageUrl("LocalScan")}>
+                <DropdownMenuItem className="cursor-pointer">
+                  <Server className="w-4 h-4 mr-2" />
+                  Scan This System <span className="ml-2 text-xs text-muted-foreground">(preview)</span>
+                </DropdownMenuItem>
+              </Link>
+              <Link to={createPageUrl("Import")}>
+                <DropdownMenuItem className="cursor-pointer">
+                  <FileDigit className="w-4 h-4 mr-2" />
+                  Import Syft Output
+                </DropdownMenuItem>
+              </Link>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      {/* Recently Imported Scans */}
-      {imports.length > 0 && (
-        <div className="mb-6">
-          <ImportedScansList 
-            imports={imports} 
-            onViewScan={handleViewImportedScan} 
-            onReloadData={loadData}
-          />
+      {isLoading ? (
+        <div className="space-y-6">
+          <Skeleton className="h-[200px] w-full rounded-xl" />
+          <Skeleton className="h-[300px] w-full rounded-xl" />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {/* Systems Overview Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Total Systems
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center">
+                  <Server className="w-5 h-5 text-blue-500 mr-2" />
+                  <span className="text-3xl font-bold">{systems.length}</span>
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Total Packages
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center">
+                  <FileDigit className="w-5 h-5 text-green-500 mr-2" />
+                  <span className="text-3xl font-bold">
+                    {systems.reduce((total, system) => total + getPackageCount(system), 0)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Actions
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-2">
+                  <Link to={createPageUrl("GravitonCompatibility")} className="flex-1">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="outline" className="w-full">
+                            <Cpu className="w-4 h-4 mr-2" />
+                            View Analysis
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>View Graviton compatibility analysis for all systems</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </Link>
+                  <Link to={createPageUrl("Import")} className="flex-1">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="outline" className="w-full">
+                            <FileUp className="w-4 h-4 mr-2" />
+                            Import Data
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Import existing system analysis data</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Systems List */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>Analyzed Systems</span>
+                <Button variant="ghost" onClick={loadData} className="text-sm h-8 px-2">
+                  Refresh
+                </Button>
+              </CardTitle>
+              <CardDescription>
+                All analyzed systems in your project
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {systems.length === 0 ? (
+                <div className="text-center py-8">
+                  <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">No Systems Found</h3>
+                  <p className="text-gray-500 mb-4">
+                    Start by analyzing a system or importing existing system data
+                  </p>
+                  <div className="flex justify-center gap-4">
+                    <Link to={createPageUrl("ScanConfiguration")}>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="outline">
+                              <Terminal className="w-4 h-4 mr-2" />
+                              Remote System Scan
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Scan multiple remote systems for analysis</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </Link>
+                    <Link to={createPageUrl("LocalScan")}>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="outline">
+                              <Server className="w-4 h-4 mr-2" />
+                              Scan This System <span className="ml-1 text-xs text-muted-foreground">(preview)</span>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Analyze the current system (preview feature)</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </Link>
+                    <Link to={createPageUrl("Import")}>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="outline">
+                              <FileDigit className="w-4 h-4 mr-2" />
+                              Import Syft Output
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Import existing Syft scan outputs</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md border dark:border-gray-700">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>System</TableHead>
+                        <TableHead>OS / Distribution</TableHead>
+                        <TableHead>Analysis Date</TableHead>
+                        <TableHead>Packages</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {systems.map((system) => (
+                        <TableRow 
+                          key={system.id} 
+                          className="hover-highlight cursor-pointer"
+                          onClick={() => handleSystemClick(system)}
+                        >
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              <Server className="h-4 w-4 text-blue-500" />
+                              {system.hostname}
+                            </div>
+                          </TableCell>
+                          <TableCell>{formatDistribution(system)}</TableCell>
+                          <TableCell>
+                            {format(new Date(system.scan_date), "MMM d, yyyy")}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <FileDigit className="h-3.5 w-3.5 text-gray-500" />
+                              {getPackageCount(system)}
+                            </div>
+                          </TableCell>
+                          <TableCell>{getStatusBadge(system.status)}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="flex items-center gap-1"
+                                  >
+                                    <MoreVertical className="h-3.5 w-3.5" />
+                                    Actions
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleSystemClick(system)}>
+                                    <Cpu className="h-4 w-4 mr-2" />
+                                    View Analysis
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem 
+                                    className="text-red-600 focus:text-red-600"
+                                    onClick={() => {
+                                      setSystemToDelete(system);
+                                      setShowDeleteDialog(true);
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete System
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
 
-      <div className="grid lg:grid-cols-12 gap-6">
-        {/* Scans List */}
-        <Card className="lg:col-span-4">
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Recent Scans</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[700px]">
-              {scans.map((scan) => (
-                <div
-                  key={scan.id}
-                  onClick={() => setSelectedScan(scan)}
-                  className={`p-4 cursor-pointer rounded-lg mb-2 ${
-                    selectedScan?.id === scan.id
-                      ? "bg-blue-50 border border-blue-200"
-                      : "hover:bg-gray-50 dark:hover:bg-gray-700"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <Server className="h-5 w-5 text-gray-500 mr-2" />
-                      <div>
-                        <p className="font-medium">{scan.hostname}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {format(new Date(scan.scan_date), "MMM d, yyyy HH:mm")}
-                          </p>
-                          <Badge className={getStatusColor(scan.status)}>
-                            {scan.status}
-                          </Badge>
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeletingScan(scan);
-                        setDeleteDialogOpen(true);
-                      }}
-                      className="text-gray-400 hover:text-red-500"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  {scan.performance_metrics && (
-                    <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                      <div className="flex items-center gap-2">
-                        <Activity className="w-4 h-4" />
-                        CPU: {scan.performance_metrics.cpu_usage}% | RAM: {formatSize(scan.performance_metrics.memory_usage)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        {/* Scan Details */}
-        <div className="lg:col-span-8">
-          {selectedScan ? (
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <CardTitle className="text-xl font-semibold">
-                      {selectedScan.hostname}
-                    </CardTitle>
-                    <div className="flex items-center gap-2 mt-2">
-                      <Badge variant="outline">
-                        {selectedScan.os_info.distribution} {selectedScan.os_info.version}
-                      </Badge>
-                      <Badge variant="outline">
-                        {selectedScan.os_info.architecture}
-                      </Badge>
-                    </div>
-                  </div>
-                  <Button variant="outline">
-                    <Download className="w-4 h-4 mr-2" />
-                    Export ({outputFormat.toUpperCase()})
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Tabs defaultValue="system" className="w-full">
-                  <TabsList className="grid grid-cols-5 gap-4">
-                    <TabsTrigger value="system">
-                      <Settings className="w-4 h-4 mr-2" />
-                      System
-                    </TabsTrigger>
-                    <TabsTrigger value="packages">
-                      <Package className="w-4 h-4 mr-2" />
-                      Packages
-                    </TabsTrigger>
-                    <TabsTrigger value="languages">
-                      <Code2 className="w-4 h-4 mr-2" />
-                      Languages
-                    </TabsTrigger>
-                    <TabsTrigger value="deployment">
-                      <Box className="w-4 h-4 mr-2" />
-                      Deployment
-                    </TabsTrigger>
-                    <TabsTrigger value="storage">
-                      <Database className="w-4 h-4 mr-2" />
-                      Storage
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="system" className="mt-4">
-                    <div className="grid gap-4">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Performance Metrics</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-4">
-                            <div>
-                              <div className="flex justify-between mb-2">
-                                <span>CPU Usage</span>
-                                <span>{selectedScan.performance_metrics?.cpu_usage}%</span>
-                              </div>
-                              <Progress value={selectedScan.performance_metrics?.cpu_usage} />
-                            </div>
-                            <div>
-                              <div className="flex justify-between mb-2">
-                                <span>Memory Usage</span>
-                                <span>{formatSize(selectedScan.performance_metrics?.memory_usage)}</span>
-                              </div>
-                              <Progress 
-                                value={(selectedScan.performance_metrics?.memory_usage / 1048576) * 100} 
-                              />
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="packages" className="mt-4">
-                    <div className="space-y-6">
-                      {selectedScan.package_managers?.map((pm, idx) => (
-                        <Card key={idx}>
-                          <CardHeader>
-                            <CardTitle className="capitalize">{pm.name} Packages</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Package Name</TableHead>
-                                  <TableHead>Version</TableHead>
-                                  <TableHead>Source</TableHead>
-                                  <TableHead>Licenses</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {pm.packages.map((pkg, index) => (
-                                  <TableRow key={index}>
-                                    <TableCell className="font-medium">{pkg.name}</TableCell>
-                                    <TableCell>{pkg.version}</TableCell>
-                                    <TableCell>{pkg.source}</TableCell>
-                                    <TableCell>
-                                      <div className="flex gap-1">
-                                        {pkg.licenses?.map((license, i) => (
-                                          <Badge key={i} variant="secondary">
-                                            {license}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="languages" className="mt-4">
-                    <div className="space-y-6">
-                      {selectedScan.programming_environments?.map((env, idx) => (
-                        <Card key={idx}>
-                          <CardHeader>
-                            <CardTitle>
-                              {env.runtime.name} {env.runtime.version}
-                            </CardTitle>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                              Package Manager: {env.package_manager}
-                            </p>
-                          </CardHeader>
-                          <CardContent>
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Dependency</TableHead>
-                                  <TableHead>Version</TableHead>
-                                  <TableHead>Source</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {env.dependencies.map((dep, index) => (
-                                  <TableRow key={index}>
-                                    <TableCell className="font-medium">{dep.name}</TableCell>
-                                    <TableCell>{dep.version}</TableCell>
-                                    <TableCell>{dep.source}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="deployment" className="mt-4">
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <p className="text-sm font-medium dark:text-gray-300">Deployment Method</p>
-                              <p className="mt-1 dark:text-gray-500">{selectedScan.deployment_info?.method}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium dark:text-gray-300">Version</p>
-                              <p className="mt-1 dark:text-gray-500">{selectedScan.deployment_info?.version}</p>
-                            </div>
-                            {selectedScan.deployment_info?.container_image && (
-                              <div className="col-span-2">
-                                <p className="text-sm font-medium dark:text-gray-300">Container Image</p>
-                                <p className="mt-1 font-mono text-sm dark:text-gray-500">
-                                  {selectedScan.deployment_info.container_image}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-
-                  <TabsContent value="storage" className="mt-4">
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <p className="text-sm font-medium dark:text-gray-300">Storage Type</p>
-                              <p className="mt-1 dark:text-gray-500">{selectedScan.scan_config?.storage_type}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium dark:text-gray-300">Compression</p>
-                              <Badge variant="outline">
-                                {selectedScan.scan_config?.compression ? "Enabled" : "Disabled"}
-                              </Badge>
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium dark:text-gray-300">Parallel Scanning</p>
-                              <Badge variant="outline">
-                                {selectedScan.scan_config?.parallel_scan ? "Enabled" : "Disabled"}
-                              </Badge>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="h-full flex items-center justify-center text-gray-500 dark:text-gray-400">
-              Select a scan to view details
-            </Card>
-          )}
-        </div>
-      </div>
-
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-              Delete Scan
-            </DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete the scan for "{deletingScan?.hostname}"? 
-              This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button 
-              variant="outline" 
-              onClick={() => setDeleteDialogOpen(false)}
-              disabled={isDeleting}
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete System</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the system "{systemToDelete?.hostname}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setSystemToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleDeleteSystem}
+              className="bg-red-600 hover:bg-red-700"
             >
-              Cancel
-            </Button>
-            <Button 
-              variant="destructive" 
-              onClick={handleDeleteScan}
-              disabled={isDeleting}
-            >
-              {isDeleting ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              Delete System
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </div>
   );
 }

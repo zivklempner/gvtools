@@ -13,6 +13,14 @@ export const ScanConfig = base44.entities.ScanConfig;
 
 export const GravitonCompatibility = base44.entities.GravitonCompatibility;
 
+export const Project = base44.entities.Project;
+
+export const CodeAnalysis = base44.entities.CodeAnalysis;
+
+export const DependencyAnalysis = base44.entities.DependencyAnalysis;
+
+export const ApplicationDetection = base44.entities.ApplicationDetection;
+
 
 
 // auth sdk:

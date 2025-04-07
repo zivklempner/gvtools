@@ -17,23 +17,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { 
-  FileUp, ArrowLeft, Upload, Check, AlertCircle, Loader2, File, Server, CheckCircle, Trash2
+  FileUp, ArrowLeft, Upload, Check, AlertCircle, Loader2, File, Server, CheckCircle, Trash2, Plus
 } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
-import { createPageUrl } from "@/utils";
-import { format } from "date-fns";
+import { createPageUrl } from "@/utils/navigation";
+import { format as dateFormat } from "date-fns";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export default function Import() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
-  const [file, setFile] = useState(null);
-  const [fileName, setFileName] = useState("");
+  const [files, setFiles] = useState([]);
   const [format, setFormat] = useState("syft-json");
-  const [hostname, setHostname] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [importedScan, setImportedScan] = useState(null);
+  const [importedScans, setImportedScans] = useState([]);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
@@ -53,43 +59,36 @@ export default function Import() {
     e.stopPropagation();
     setDragActive(false);
     
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const newFiles = Array.from(e.dataTransfer.files);
+      setFiles(prevFiles => [...prevFiles, ...newFiles]);
     }
   }, []);
 
   const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      setFiles(prevFiles => [...prevFiles, ...newFiles]);
     }
   };
 
-  const handleFile = (selectedFile) => {
-    setError(null);
-    setFile(selectedFile);
-    setFileName(selectedFile.name);
+  const removeFile = (index) => {
+    setFiles(prevFiles => prevFiles.filter((_, i) => i !== index));
   };
 
   const resetForm = () => {
-    setFile(null);
-    setFileName("");
+    setFiles([]);
     setFormat("syft-json");
-    setHostname("");
     setIsUploading(false);
     setUploadProgress(0);
     setIsProcessing(false);
-    setImportedScan(null);
+    setImportedScans([]);
     setError(null);
   };
 
-  const uploadFile = async () => {
-    if (!file) {
-      setError("Please select a file to upload");
-      return;
-    }
-    
-    if (!hostname.trim()) {
-      setError("Please enter a hostname");
+  const uploadFiles = async () => {
+    if (files.length === 0) {
+      setError("Please select at least one file to upload");
       return;
     }
     
@@ -98,254 +97,151 @@ export default function Import() {
       setError(null);
       setUploadSuccess(false);
       
-      // Simulate upload progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return prev;
-          }
-          return Math.min(90, prev + 5);
-        });
-      }, 100);
+      const progressStep = 100 / files.length;
+      const uploadedScans = [];
       
-      // Upload file
-      const { file_url } = await UploadFile({ file });
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        // Simulate upload progress
+        const baseProgress = i * progressStep;
+        const progressInterval = setInterval(() => {
+          setUploadProgress(prev => {
+            const targetProgress = baseProgress + progressStep * 0.9;
+            if (prev >= targetProgress) {
+              clearInterval(progressInterval);
+              return prev;
+            }
+            return Math.min(targetProgress, prev + 0.5);
+          });
+        }, 50);
+        
+        // Upload file
+        const { file_url } = await UploadFile({ file });
+        
+        clearInterval(progressInterval);
+        
+        // Create imported scan record
+        const importData = {
+          file_url,
+          file_name: file.name,
+          format,
+          import_date: new Date().toISOString(),
+          hostname: file.name.replace(/\.[^/.]+$/, ""), // Use filename (without extension) as default hostname
+          status: "imported"
+        };
+        
+        const newImport = await ImportedScan.create(importData);
+        uploadedScans.push(newImport);
+        
+        setUploadProgress(baseProgress + progressStep);
+      }
       
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-      
-      // Create imported scan record
-      const importData = {
-        file_url,
-        file_name: fileName,
-        format,
-        import_date: new Date().toISOString(),
-        hostname,
-        status: "imported"
-      };
-      
-      const newImport = await ImportedScan.create(importData);
-      setImportedScan(newImport);
+      setImportedScans(uploadedScans);
       setIsUploading(false);
       setUploadSuccess(true);
-      
-      // Automatically process the import after successful upload
-      setTimeout(() => {
-        processImport();
-      }, 1000);
       
     } catch (err) {
       setIsUploading(false);
       setUploadProgress(0);
-      setError("Error uploading file: " + (err.message || "Unknown error"));
+      setError("Error uploading files: " + (err.message || "Unknown error"));
       console.error("Upload error:", err);
     }
   };
 
-  const processImport = async () => {
-    if (!importedScan) return;
+  const processImports = async () => {
+    if (importedScans.length === 0) return;
     
     try {
       setIsProcessing(true);
       setError(null);
       
-      // Extract data from the uploaded Syft file
-      const { file_url, format } = importedScan;
-      
-      const extractionSchema = {
-        type: "object",
-        properties: {
-          artifacts: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                version: { type: "string" },
-                type: { type: "string" },
-                foundBy: { type: "string" },
-                language: { type: "string" },
-                purl: { type: "string" },
-                licenses: { 
-                  type: "array",
-                  items: { type: "string" }
-                }
-              }
-            }
-          },
-          source: {
-            type: "object",
-            properties: {
-              type: { type: "string" },
-              target: { type: "object" },
-              distro: { 
-                type: "object",
-                properties: {
-                  name: { type: "string" },
-                  version: { type: "string" },
-                  idLike: { type: "string" }
-                }
-              }
-            }
-          }
-        }
-      };
-
-      // Extract structured data from the Syft file
-      const { status, output, details } = await ExtractDataFromUploadedFile({
-        file_url,
-        json_schema: extractionSchema
-      });
-
-      if (status === "error") {
-        throw new Error(`Failed to parse Syft output: ${details}`);
+      // Get project ID from session storage
+      const projectId = sessionStorage.getItem('currentProjectId');
+      if (!projectId) {
+        throw new Error("No project selected. Please select a project first.");
       }
-
-      const { artifacts = [], source = {} } = output || {};
       
-      // Create a new scan result with the extracted data
-      const currentDate = new Date().toISOString();
+      // Process each imported scan
+      for (const importedScan of importedScans) {
+        await processImportedScan(importedScan, projectId);
+      }
       
-      // Group artifacts by type and language
-      const packagesByType = new Map();
-      const languageEnvs = new Map();
-
-      artifacts.forEach(artifact => {
-        const type = artifact.type?.toLowerCase() || 'unknown';
-        const language = artifact.language?.toLowerCase();
-        
-        if (language) {
-          if (!languageEnvs.has(language)) {
-            languageEnvs.set(language, []);
-          }
-          languageEnvs.get(language).push({
-            name: artifact.name,
-            version: artifact.version,
-            source: artifact.purl || artifact.foundBy || 'unknown',
-            licenses: artifact.licenses || []
-          });
-        } else {
-          if (!packagesByType.has(type)) {
-            packagesByType.set(type, []);
-          }
-          packagesByType.get(type).push({
-            name: artifact.name,
-            version: artifact.version,
-            source: artifact.purl || artifact.foundBy || 'unknown',
-            licenses: artifact.licenses || []
-          });
-        }
-      });
-
-      const newScanResult = {
-        hostname: importedScan.hostname,
-        scan_date: currentDate,
-        scan_config: {
-          output_format: importedScan.format,
-          storage_type: "local",
-          compression: false
-        },
-        os_info: {
-          name: source.distro?.name || "Linux",
-          distribution: source.distro?.name || "Unknown",
-          version: source.distro?.version || "Unknown",
-          architecture: source.distro?.idLike || "x86_64"
-        },
-        package_managers: Array.from(packagesByType.entries())
-          .filter(([type]) => ['deb', 'rpm', 'apk'].includes(type))
-          .map(([type, packages]) => ({
-            name: type,
-            packages
-          })),
-        programming_environments: Array.from(languageEnvs.entries())
-          .map(([language, dependencies]) => ({
-            runtime: {
-              name: language,
-              version: "detected",
-              path: "/usr/local/bin"
-            },
-            package_manager: language,
-            dependencies
-          })),
-        performance_metrics: {
-          cpu_usage: 0,
-          memory_usage: 0,
-          scan_duration: 0,
-          root_required: false
-        },
-        status: "completed"
-      };
-
-      // Create the scan result
-      const scanResult = await ScanResult.create(newScanResult);
-      
-      // Update the imported scan with the scan result ID and packages count
-      await ImportedScan.update(importedScan.id, {
-        status: "processed",
-        scan_result_id: scanResult.id,
-        packages_count: artifacts.length
-      });
-
-      // Check Graviton compatibility for all components
-      const compatibilityPromises = artifacts.map(async (artifact) => {
-        if (!artifact.name || !artifact.version) return null;
-        
-        try {
-          const compatibilityData = {
-            package_name: artifact.name,
-            version_pattern: artifact.version,
-            component_type: artifact.type || 'software_package',
-            notes: `Detected in ${importedScan.format} scan`,
-            source: artifact.purl || artifact.foundBy || 'scan_import',
-            last_verified: currentDate
-          };
-          
-          return await import('@/api/entities').then(({ GravitonCompatibility }) => 
-            GravitonCompatibility.create(compatibilityData)
-          );
-        } catch (err) {
-          console.error(`Failed to check compatibility for ${artifact.name}:`, err);
-          return null;
-        }
-      });
-
-      await Promise.all(compatibilityPromises);
-      
-      // Redirect to the dashboard after successful processing
+      // Redirect to dashboard
       navigate(createPageUrl("Dashboard"));
       
     } catch (err) {
-      setError("Error processing import: " + (err.message || "Unknown error"));
+      setError("Error processing imports: " + (err.message || "Unknown error"));
       console.error("Processing error:", err);
       setIsProcessing(false);
-      
-      // Update import status to error
-      if (importedScan) {
-        await ImportedScan.update(importedScan.id, {
-          status: "error",
-          error_message: err.message || "Unknown error"
-        });
-      }
     }
   };
 
-  const deleteImportedScan = async () => {
-    if (!importedScan) return;
+  const processImportedScan = async (importedScan, projectId) => {
+    try {
+      // Update this scan's status to processing
+      await ImportedScan.update(importedScan.id, { status: "processing" });
+      
+      const { file_url, format, hostname } = importedScan;
+      
+      if (format.includes('json')) {
+        // Fetch and process JSON data
+        const response = await fetch(file_url);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file: ${response.statusText}`);
+        }
+        
+        // This is a simplified example - in a real implementation,
+        // you would need more complex processing based on the format
+        const data = await response.json();
+        
+        // Create a scan result with the data
+        const scanResult = await ScanResult.create({
+          project_id: projectId,
+          hostname: hostname,
+          scan_date: data.scan_date || new Date().toISOString(),
+          status: "completed",
+          // Add other data fields as needed
+          os_info: data.os_info || { name: "Unknown", distribution: hostname }
+        });
+        
+        // Update the imported scan status
+        await ImportedScan.update(importedScan.id, {
+          status: "processed",
+          scan_result_id: scanResult.id
+        });
+      } else {
+        // Handle other formats
+        throw new Error(`Unsupported format: ${format}`);
+      }
+    } catch (error) {
+      // Mark this import as failed
+      await ImportedScan.update(importedScan.id, {
+        status: "error",
+        error_message: error.message
+      });
+      throw error;
+    }
+  };
+
+  const deleteImportedScans = async () => {
+    if (importedScans.length === 0) return;
 
     try {
       setError(null);
       setIsProcessing(true);
 
-      // Delete the imported scan record
-      await ImportedScan.delete(importedScan.id);
+      // Delete all imported scan records
+      for (const scan of importedScans) {
+        await ImportedScan.delete(scan.id);
+      }
 
       // Reset the form
       resetForm();
       setIsProcessing(false);
       navigate(createPageUrl("Dashboard"));
     } catch (err) {
-      setError("Error deleting import: " + (err.message || "Unknown error"));
+      setError("Error deleting imports: " + (err.message || "Unknown error"));
       console.error("Deletion error:", err);
       setIsProcessing(false);
     }
@@ -379,7 +275,7 @@ export default function Import() {
         </Button>
         <div>
           <h1 className="text-3xl font-bold">Import Syft Scan</h1>
-          <p className="text-gray-500 dark:text-gray-400">Upload and process Syft scan outputs</p>
+          <p className="text-gray-500">Upload and process Syft scan outputs</p>
         </div>
       </div>
 
@@ -392,114 +288,128 @@ export default function Import() {
       )}
 
       {uploadSuccess && !error && (
-        <Alert className="mb-6 bg-green-50 border-green-200 text-green-900 dark:bg-green-900 dark:border-green-700 dark:text-green-50">
-          <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+        <Alert className="mb-6 bg-green-50 border-green-200 text-green-900">
+          <CheckCircle className="h-4 w-4 text-green-600" />
           <AlertTitle>Upload Successful</AlertTitle>
           <AlertDescription>
-            Your file "{fileName}" was successfully uploaded and ready for processing.
+            Your files were successfully uploaded and ready for processing.
           </AlertDescription>
         </Alert>
       )}
 
       <div className="grid gap-6">
-        <Card className="dark:bg-slate-800 dark:border-slate-700">
+        <Card>
           <CardHeader>
-            <CardTitle className="dark:text-white">Import Syft Output</CardTitle>
-            <CardDescription className="dark:text-gray-400">
-              Upload a Syft scan output file to analyze and process
+            <CardTitle>Import Syft Output</CardTitle>
+            <CardDescription>
+              Upload one or more Syft scan output files to analyze and process
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {!file ? (
+            {files.length === 0 ? (
               <div
                 className={`border-2 border-dashed rounded-xl p-8 text-center ${
                   dragActive 
                     ? "border-blue-400 bg-blue-50" 
-                    : "border-gray-200 hover:border-gray-300 dark:border-slate-700 dark:hover:border-slate-600 dark:bg-slate-900 dark:text-gray-300"
+                    : "border-gray-200 hover:border-gray-300"
                 }`}
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleDrop}
               >
-                <div className="mx-auto w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4 dark:bg-slate-700">
+                <div className="mx-auto w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
                   <FileUp className="w-8 h-8 text-blue-500" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2 dark:text-white">Upload Syft Output File</h3>
-                <p className="text-sm text-gray-500 mb-4 dark:text-gray-400">
-                  Drag and drop your Syft output file here or click to browse
+                <h3 className="text-lg font-semibold mb-2">Upload Syft Output Files</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  Drag and drop your Syft output files here or click to browse
                 </p>
                 <input
                   type="file"
                   ref={fileInputRef}
                   className="hidden"
+                  multiple
                   onChange={handleFileChange}
                 />
                 <Button 
                   variant="outline" 
                   onClick={() => fileInputRef.current?.click()}
-                  className="gap-2 dark:border-slate-700 dark:text-gray-300 dark:hover:bg-slate-800"
+                  className="gap-2"
                 >
                   <Upload className="w-4 h-4" />
-                  Select File
+                  Select Files
                 </Button>
-                <p className="text-xs text-gray-400 mt-4 dark:text-gray-500">
+                <p className="text-xs text-gray-400 mt-4">
                   Supported formats: JSON, XML, Tag-Value
                 </p>
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="flex items-center p-4 border rounded-lg dark:border-slate-700 dark:bg-slate-800">
-                  <File className="h-10 w-10 text-blue-500 mr-4" />
-                  <div className="flex-grow">
-                    <p className="font-semibold dark:text-white">{fileName}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {(file.size / 1024).toFixed(2)} KB
-                    </p>
-                  </div>
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="text-base font-medium">Selected Files</Label>
                   <Button 
                     variant="ghost" 
-                    onClick={() => {
-                      setFile(null);
-                      setUploadSuccess(false);
-                    }}
-                    className="text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700"
-                    disabled={isUploading}
+                    size="sm" 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-8 px-2"
                   >
-                    Remove
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add More
                   </Button>
+                </div>
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>File Name</TableHead>
+                        <TableHead>Size</TableHead>
+                        <TableHead className="w-20">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {files.map((file, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              <File className="h-4 w-4 text-blue-500" />
+                              {file.name}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {(file.size / 1024).toFixed(2)} KB
+                          </TableCell>
+                          <TableCell>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              className="h-8 px-2 text-red-500 hover:text-red-700"
+                              onClick={() => removeFile(index)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
                 
                 <div className="grid gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="format" className="dark:text-gray-300">File Format</Label>
+                    <Label htmlFor="format">File Format</Label>
                     <Select value={format} onValueChange={setFormat} disabled={isUploading}>
-                      <SelectTrigger id="format" className="dark:bg-slate-700 dark:border-slate-700 dark:text-gray-300">
+                      <SelectTrigger id="format">
                         <SelectValue placeholder="Select format" />
                       </SelectTrigger>
-                      <SelectContent className="dark:bg-slate-800 dark:border-slate-700 dark:text-gray-300">
+                      <SelectContent>
                         {formatOptions.map(option => (
-                          <SelectItem key={option.value} value={option.value} className="dark:hover:bg-slate-700">
+                          <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  
-                  <div className="grid gap-2">
-                    <Label htmlFor="hostname" className="dark:text-gray-300">System Hostname/Identifier</Label>
-                    <div className="flex gap-2">
-                      <Server className="w-4 h-4 text-gray-500 mt-2.5 dark:text-gray-400" />
-                      <Input
-                        id="hostname"
-                        placeholder="Enter system name or identifier"
-                        value={hostname}
-                        onChange={(e) => setHostname(e.target.value)}
-                        disabled={isUploading}
-                        className="dark:bg-slate-700 dark:border-slate-700 dark:text-gray-300"
-                      />
-                    </div>
                   </div>
                 </div>
               </div>
@@ -507,20 +417,20 @@ export default function Import() {
 
             {isUploading && (
               <div className="mt-6 space-y-2">
-                <div className="flex justify-between text-sm dark:text-gray-300">
-                  <span>Uploading...</span>
-                  <span>{uploadProgress}%</span>
+                <div className="flex justify-between text-sm">
+                  <span>Uploading files...</span>
+                  <span>{Math.round(uploadProgress)}%</span>
                 </div>
                 <Progress value={uploadProgress} className="h-2" />
               </div>
             )}
           </CardContent>
           <CardFooter className="flex justify-end gap-3">
-            {!importedScan ? (
+            {importedScans.length === 0 ? (
               <Button 
-                onClick={uploadFile} 
-                disabled={!file || isUploading || !hostname}
-                className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-800 dark:hover:bg-blue-700"
+                onClick={uploadFiles} 
+                disabled={files.length === 0 || isUploading}
+                className="bg-blue-600 hover:bg-blue-700"
               >
                 {isUploading ? (
                   <>
@@ -530,7 +440,7 @@ export default function Import() {
                 ) : (
                   <>
                     <Upload className="mr-2 h-4 w-4" />
-                    Upload File
+                    Upload Files
                   </>
                 )}
               </Button>
@@ -538,7 +448,7 @@ export default function Import() {
               <div className="flex gap-3">
                 <Button
                   variant="destructive"
-                  onClick={deleteImportedScan}
+                  onClick={deleteImportedScans}
                   disabled={isProcessing}
                 >
                   {isProcessing ? (
@@ -554,9 +464,9 @@ export default function Import() {
                   )}
                 </Button>
                 <Button 
-                  onClick={processImport} 
+                  onClick={processImports} 
                   disabled={isProcessing}
-                  className="bg-green-600 hover:bg-green-700 dark:bg-green-800 dark:hover:bg-green-700"
+                  className="bg-green-600 hover:bg-green-700"
                 >
                   {isProcessing ? (
                     <>
@@ -566,7 +476,7 @@ export default function Import() {
                   ) : (
                     <>
                       <Check className="mr-2 h-4 w-4" />
-                      Process Import
+                      Process Imports
                     </>
                   )}
                 </Button>
@@ -575,38 +485,55 @@ export default function Import() {
           </CardFooter>
         </Card>
 
-        {importedScan && !isProcessing && (
-          <Card className="dark:bg-slate-800 dark:border-slate-700">
+        {importedScans.length > 0 && !isProcessing && (
+          <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 dark:text-white">
+              <CardTitle className="flex items-center gap-2">
                 <CheckCircle className="h-5 w-5 text-green-500" />
                 Import Details
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">File Name</p>
-                    <p className="font-medium dark:text-gray-300">{importedScan.file_name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Format</p>
-                    <p className="font-medium dark:text-gray-300">{formatOptions.find(f => f.value === importedScan.format)?.label}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Import Date</p>
-                    <p className="font-medium dark:text-gray-300">{format(new Date(importedScan.import_date), "PPP")}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Hostname</p>
-                    <p className="font-medium dark:text-gray-300">{importedScan.hostname}</p>
-                  </div>
-                </div>
-                <Alert className="bg-blue-50 border-blue-200 dark:bg-blue-900 dark:border-blue-700">
-                  <AlertCircle className="h-4 w-4 text-blue-500 dark:text-blue-400" />
-                  <AlertDescription className="dark:text-gray-300">
-                    Click "Process Import" to analyze the Syft output and create a scan result
+              <div className="space-y-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>File Name</TableHead>
+                      <TableHead>Format</TableHead>
+                      <TableHead>Hostname</TableHead>
+                      <TableHead>Import Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {importedScans.map((scan) => (
+                      <TableRow key={scan.id}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <File className="h-4 w-4 text-blue-500" />
+                            {scan.file_name}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {formatOptions.find(f => f.value === scan.format)?.label || scan.format}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Server className="h-4 w-4 text-gray-500" />
+                            {scan.hostname}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {dateFormat(new Date(scan.import_date), "PPP")}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                
+                <Alert className="bg-blue-50 border-blue-200">
+                  <AlertCircle className="h-4 w-4 text-blue-500" />
+                  <AlertDescription>
+                    Click "Process Imports" to analyze these files and create scan results
                   </AlertDescription>
                 </Alert>
               </div>

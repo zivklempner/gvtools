@@ -1,803 +1,729 @@
-import React, { useState, useEffect } from 'react';
-import { ScanConfig } from '@/api/entities';
+
+import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { createPageUrl } from "@/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Calendar } from "@/components/ui/calendar";
 import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
-  Settings, Save, RotateCcw, PlusCircle, ListChecks, Database, FileSearch, GanttChart,
-  Layers, ShieldCheck, X, Edit, Star, Trash2, Workflow, HelpCircle, Info
+  Terminal, ArrowLeft, Upload, Server, AlertCircle, 
+  FileUp, Info, Loader2, Key, Lock, Calendar as CalendarIcon,
+  FileText, Check, Clock, Database, Eye, EyeOff, ShieldCheck, Workflow,
+  UserCircle, Info as InfoCircle
 } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
+import { format } from "date-fns";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ExtractDataFromUploadedFile, UploadFile } from "@/api/integrations";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { format } from "date-fns";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 export default function ScanConfiguration() {
-  const [configs, setConfigs] = useState([]);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentTab, setCurrentTab] = useState("saved");
-  const [selectedConfig, setSelectedConfig] = useState(null);
-  const [formValues, setFormValues] = useState({
-    name: '',
-    source_type: 'container_image',
-    source_path: '',
-    output_format: 'cyclonedx-json',
-    template_path: '',
-    package_cataloging: true,
-    file_cataloging: false,
-    file_contents_cataloging: false,
-    performance_profile: 'balanced',
-    parallelism: 4,
-    exclude_patterns: [],
-    ci_integration: {
-      enabled: false,
-      fail_on_severity: 'high',
-      summary_file: 'sbom-results.json'
-    }
-  });
-  const [newExcludePattern, setNewExcludePattern] = useState('');
+  const navigate = useNavigate();
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [currentSystem, setCurrentSystem] = useState("");
+  const [scanError, setScanError] = useState(null);
+  const fileInputRef = useRef(null);
+  const sshKeyFileRef = useRef(null);
+  
+  // Bulk input states
+  const [targetSystems, setTargetSystems] = useState("");
+  const [file, setFile] = useState(null);
+  const [fileName, setFileName] = useState("");
+  
+  // Single system connection states
+  const [connectionType, setConnectionType] = useState("ssh");
+  const [hostname, setHostname] = useState("");
+  const [port, setPort] = useState("22");
+  const [username, setUsername] = useState("");
+  const [authMethod, setAuthMethod] = useState("password");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [sshKey, setSshKey] = useState("");
+  const [sshKeyFile, setSshKeyFile] = useState(null);
+  const [sshKeyFileName, setSshKeyFileName] = useState("");
+  
+  // Scan configuration
+  const [packageManagers, setPackageManagers] = useState(true);
+  const [programmingEnvs, setProgrammingEnvs] = useState(true);
+  const [systemInfo, setSystemInfo] = useState(true);
+  const [containerInfo, setContainerInfo] = useState(false);
+  const [applicationDetection, setApplicationDetection] = useState(true);
+  
+  // Scheduling
+  const [scheduleForLater, setScheduleForLater] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState(new Date());
+  const [scheduleTime, setScheduleTime] = useState("12:00");
 
-  useEffect(() => {
-    loadConfigs();
-  }, []);
+  const [scanMode, setScanMode] = useState("single");
 
-  const loadConfigs = async () => {
-    try {
-      const data = await ScanConfig.list('-created_date');
-      setConfigs(data);
-      if (data.length > 0 && !selectedConfig) {
-        setSelectedConfig(data[0]);
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.type !== "text/csv") {
+        setScanError("Please upload a CSV file");
+        return;
       }
-    } catch (error) {
-      console.error("Error loading scan configurations:", error);
+      setFile(file);
+      setFileName(file.name);
+      setScanError(null);
     }
   };
 
-  const handleCreate = async () => {
-    try {
-      const newConfig = await ScanConfig.create(formValues);
-      await loadConfigs();
-      setIsCreating(false);
-      setCurrentTab("saved");
-      setSelectedConfig(newConfig);
-    } catch (error) {
-      console.error("Error creating scan configuration:", error);
+  const handleSshKeyFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setSshKeyFile(file);
+      setSshKeyFileName(file.name);
     }
   };
 
-  const handleUpdate = async () => {
-    try {
-      await ScanConfig.update(selectedConfig.id, formValues);
-      await loadConfigs();
-      setIsEditing(false);
-    } catch (error) {
-      console.error("Error updating scan configuration:", error);
+  const handleTestConnection = () => {
+    // Simulate connection test
+    setIsScanning(true);
+    setScanProgress(20);
+    setTimeout(() => {
+      setIsScanning(false);
+      setScanProgress(0);
+      alert(`Successfully connected to ${hostname}`);
+    }, 2000);
+  };
+
+  const parseTargets = () => {
+    if (scanMode === "single") {
+      return [hostname];
     }
-  };
-
-  const handleDelete = async (id) => {
-    try {
-      await ScanConfig.delete(id);
-      await loadConfigs();
-      setSelectedConfig(configs.length > 1 ? configs[0] : null);
-    } catch (error) {
-      console.error("Error deleting scan configuration:", error);
-    }
-  };
-
-  const startNew = () => {
-    setFormValues({
-      name: '',
-      source_type: 'container_image',
-      source_path: '',
-      output_format: 'cyclonedx-json',
-      template_path: '',
-      package_cataloging: true,
-      file_cataloging: false,
-      file_contents_cataloging: false,
-      performance_profile: 'balanced',
-      parallelism: 4,
-      exclude_patterns: [],
-      ci_integration: {
-        enabled: false,
-        fail_on_severity: 'high',
-        summary_file: 'sbom-results.json'
-      }
-    });
-    setIsCreating(true);
-    setCurrentTab("editor");
-  };
-
-  const startEdit = (config) => {
-    setFormValues(config);
-    setIsEditing(true);
-    setCurrentTab("editor");
-  };
-
-  const cancelEdit = () => {
-    setIsCreating(false);
-    setIsEditing(false);
-    setCurrentTab("saved");
-  };
-
-  const handleSelectConfig = (config) => {
-    setSelectedConfig(config);
-  };
-
-  const addExcludePattern = () => {
-    if (newExcludePattern.trim()) {
-      setFormValues({
-        ...formValues,
-        exclude_patterns: [...(formValues.exclude_patterns || []), newExcludePattern.trim()]
+    
+    const targets = new Set();
+    
+    // Parse manually entered targets (hostnames or IPs)
+    if (targetSystems.trim()) {
+      targetSystems.split(/[\n,]/).forEach(system => {
+        const trimmed = system.trim();
+        if (trimmed) targets.add(trimmed);
       });
-      setNewExcludePattern('');
+    }
+    
+    return Array.from(targets);
+  };
+
+  const processCsvFile = async () => {
+    try {
+      const { file_url } = await UploadFile({ file });
+      
+      const { status, output } = await ExtractDataFromUploadedFile({
+        file_url,
+        json_schema: {
+          type: "object",
+          properties: {
+            targets: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  hostname: { type: "string" },
+                  ip_address: { type: "string" }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (status === "error") {
+        throw new Error("Failed to parse CSV file");
+      }
+
+      return output.targets.map(t => t.hostname || t.ip_address);
+    } catch (error) {
+      console.error("Error processing CSV:", error);
+      throw new Error("Failed to process CSV file");
+    }
+  };
+  
+  const validateSingleSystemForm = () => {
+    if (!hostname) {
+      return "Hostname or IP address is required";
+    }
+    
+    if (authMethod === "password" && !password) {
+      return "Password is required";
+    }
+    
+    if (authMethod === "ssh_key" && !sshKey && !sshKeyFile) {
+      return "SSH key is required";
+    }
+    
+    if (port && isNaN(parseInt(port))) {
+      return "Port must be a number";
+    }
+    
+    return null;
+  };
+
+  const startScan = async () => {
+    try {
+      // Validate form based on mode
+      if (scanMode === "single") {
+        const validationError = validateSingleSystemForm();
+        if (validationError) {
+          throw new Error(validationError);
+        }
+      } else if (scanMode === "bulk" && !targetSystems.trim() && !file) {
+        throw new Error("Please enter target systems or upload a CSV file");
+      }
+      
+      setIsScanning(true);
+      setScanError(null);
+      
+      let targets = parseTargets();
+      
+      // If CSV file is provided in bulk mode, process it and add targets
+      if (scanMode === "bulk" && file) {
+        const csvTargets = await processCsvFile();
+        targets = [...new Set([...targets, ...csvTargets])];
+      }
+      
+      if (targets.length === 0) {
+        throw new Error("No valid targets found. Please specify at least one system to scan.");
+      }
+
+      // For each target, simulate a scan
+      for (let i = 0; i < targets.length; i++) {
+        setCurrentSystem(targets[i]);
+        setScanProgress((i / targets.length) * 100);
+        
+        // Simulate scanning steps for each target
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      setScanProgress(100);
+      setTimeout(() => {
+        navigate(createPageUrl("Dashboard"));
+      }, 1000);
+      
+    } catch (error) {
+      console.error("Scan error:", error);
+      setScanError(error.message);
+      setIsScanning(false);
     }
   };
 
-  const removeExcludePattern = (index) => {
-    const newPatterns = [...formValues.exclude_patterns];
-    newPatterns.splice(index, 1);
-    setFormValues({
-      ...formValues, 
-      exclude_patterns: newPatterns
-    });
-  };
+  if (isScanning) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Scanning Systems</CardTitle>
+            <CardDescription>
+              Analyzing {currentSystem ? `${currentSystem}` : 'systems'} for Graviton compatibility
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Current system: {currentSystem}</span>
+                <span>{Math.round(scanProgress)}%</span>
+              </div>
+              <Progress value={scanProgress} className="h-2" />
+            </div>
 
-  const getSourceTypeIcon = (type) => {
-    switch (type) {
-      case 'container_image':
-        return <Database className="h-4 w-4" />;
-      case 'filesystem':
-        return <FileSearch className="h-4 w-4" />;
-      case 'archive':
-        return <Layers className="h-4 w-4" />;
-      case 'oci_registry':
-        return <Database className="h-4 w-4" />;
-      case 'podman':
-        return <Database className="h-4 w-4" />;
-      case 'directory':
-        return <FileSearch className="h-4 w-4" />;
-      default:
-        return <Database className="h-4 w-4" />;
-    }
-  };
-
-  const getSourceTypeLabel = (type) => {
-    return type.split('_').map(word => 
-      word.charAt(0).toUpperCase() + word.slice(1)
-    ).join(' ');
-  };
+            {scanError && (
+              <Alert variant="destructive">
+                <AlertDescription>{scanError}</AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">SBOM Generation</h1>
-          <p className="text-gray-500">Configure and manage SBOM generation profiles</p>
-        </div>
-        <Button 
-          onClick={startNew} 
-          className="bg-blue-600 hover:bg-blue-700"
+      <div className="flex items-center mb-6">
+        <Button
+          variant="outline"
+          size="icon"
+          className="mr-4"
+          onClick={() => navigate(createPageUrl("Dashboard"))}
         >
-          <PlusCircle className="w-4 h-4 mr-2" />
-          New Configuration
+          <ArrowLeft className="w-4 h-4" />
         </Button>
+        <div>
+          <h1 className="text-3xl font-bold">Remote System Scan</h1>
+          <p className="text-gray-500">Configure and run system analysis on remote targets</p>
+        </div>
       </div>
 
-      <Tabs 
-        value={currentTab} 
-        onValueChange={setCurrentTab}
-        className="w-full"
-      >
-        <TabsList className="grid grid-cols-2 w-[400px]">
-          <TabsTrigger value="saved">
-            <Star className="w-4 h-4 mr-2" />
-            Saved Configurations
-          </TabsTrigger>
-          <TabsTrigger value="editor" disabled={!isCreating && !isEditing}>
-            <Edit className="w-4 h-4 mr-2" />
-            Configuration Editor
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="saved" className="mt-6">
-          <div className="grid md:grid-cols-12 gap-6">
-            <div className="md:col-span-4 space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Saved Configurations</CardTitle>
-                  <CardDescription>
-                    Select a configuration to view or edit
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-[500px] pr-4">
-                    {configs.length === 0 ? (
-                      <div className="p-4 text-center text-gray-500">
-                        <p>No configurations created yet.</p>
-                        <Button 
-                          onClick={startNew} 
-                          variant="outline" 
-                          className="mt-4"
-                        >
-                          <PlusCircle className="w-4 h-4 mr-2" />
-                          Create Your First Configuration
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {configs.map((config) => (
-                          <div
-                            key={config.id}
-                            onClick={() => handleSelectConfig(config)}
-                            className={`p-4 rounded-lg cursor-pointer ${
-                              selectedConfig?.id === config.id
-                                ? "bg-blue-50 border border-blue-200"
-                                : "hover:bg-gray-50 border border-transparent"
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <h3 className="font-medium">{config.name}</h3>
-                              <Badge variant="outline" className="flex items-center gap-1">
-                                {getSourceTypeIcon(config.source_type)}
-                                <span>{getSourceTypeLabel(config.source_type)}</span>
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-gray-500 mt-1 truncate">
-                              {config.source_path}
-                            </p>
-                            <div className="flex items-center justify-between mt-2">
-                              <Badge className="bg-blue-100 text-blue-800">
-                                {config.output_format}
-                              </Badge>
-                              <span className="text-xs text-gray-500">
-                                Created: {format(new Date(config.created_date), "MMM d, yyyy")}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="md:col-span-8">
-              {selectedConfig ? (
-                <Card>
-                  <CardHeader className="flex flex-row items-start justify-between">
-                    <div>
-                      <CardTitle className="text-xl font-bold">{selectedConfig.name}</CardTitle>
-                      <CardDescription className="mt-1.5">
-                        {getSourceTypeLabel(selectedConfig.source_type)} Configuration
-                      </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => startEdit(selectedConfig)}
-                      >
-                        <Edit className="w-4 h-4 mr-2" />
-                        Edit
-                      </Button>
-                      <Button 
-                        variant="destructive" 
-                        size="sm" 
-                        onClick={() => handleDelete(selectedConfig.id)}
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Delete
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-6">
-                      <div className="grid gap-6 md:grid-cols-2">
-                        <div>
-                          <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-                            <Database className="w-4 h-4 text-gray-500" />
-                            Source Information
-                          </h3>
-                          <Card>
-                            <CardContent className="p-4">
-                              <div className="space-y-2">
-                                <div>
-                                  <p className="text-sm text-gray-500">Type</p>
-                                  <p className="font-medium">{getSourceTypeLabel(selectedConfig.source_type)}</p>
-                                </div>
-                                <div>
-                                  <p className="text-sm text-gray-500">Path/URL</p>
-                                  <p className="font-medium break-all">{selectedConfig.source_path}</p>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </div>
-
-                        <div>
-                          <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-                            <Workflow className="w-4 h-4 text-gray-500" />
-                            Output Settings
-                          </h3>
-                          <Card>
-                            <CardContent className="p-4">
-                              <div className="space-y-2">
-                                <div>
-                                  <p className="text-sm text-gray-500">Format</p>
-                                  <p className="font-medium">{selectedConfig.output_format}</p>
-                                </div>
-                                {selectedConfig.output_format === 'template' && (
-                                  <div>
-                                    <p className="text-sm text-gray-500">Template Path</p>
-                                    <p className="font-medium">{selectedConfig.template_path || "Not specified"}</p>
-                                  </div>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-                          <ListChecks className="w-4 h-4 text-gray-500" />
-                          Cataloging Options
-                        </h3>
-                        <div className="grid gap-4 md:grid-cols-3">
-                          <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-md">
-                            <Switch checked={selectedConfig.package_cataloging} disabled />
-                            <span>Package Cataloging</span>
-                          </div>
-                          <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-md">
-                            <Switch checked={selectedConfig.file_cataloging} disabled />
-                            <span>File Cataloging</span>
-                          </div>
-                          <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-md">
-                            <Switch checked={selectedConfig.file_contents_cataloging} disabled />
-                            <span>Content Cataloging</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-                          <GanttChart className="w-4 h-4 text-gray-500" />
-                          Performance Settings
-                        </h3>
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <div className="bg-gray-50 p-4 rounded-md">
-                            <div className="flex items-center justify-between mb-2">
-                              <span>Profile</span>
-                              <Badge>
-                                {selectedConfig.performance_profile}
-                              </Badge>
-                            </div>
-                          </div>
-                          <div className="bg-gray-50 p-4 rounded-md">
-                            <div className="flex items-center justify-between mb-2">
-                              <span>Parallelism</span>
-                              <Badge>
-                                {selectedConfig.parallelism} workers
-                              </Badge>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {selectedConfig.exclude_patterns && selectedConfig.exclude_patterns.length > 0 && (
-                        <div>
-                          <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-                            <X className="w-4 h-4 text-gray-500" />
-                            Excluded Patterns
-                          </h3>
-                          <div className="flex flex-wrap gap-2">
-                            {selectedConfig.exclude_patterns.map((pattern, index) => (
-                              <Badge key={index} variant="secondary">
-                                {pattern}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedConfig.ci_integration && selectedConfig.ci_integration.enabled && (
-                        <div>
-                          <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-                            <ShieldCheck className="w-4 h-4 text-gray-500" />
-                            CI/CD Integration
-                          </h3>
-                          <Card>
-                            <CardContent className="p-4">
-                              <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <span>Fail on Severity</span>
-                                  <Badge className="capitalize">
-                                    {selectedConfig.ci_integration.fail_on_severity}
-                                  </Badge>
-                                </div>
-                                <div>
-                                  <p className="text-sm text-gray-500">Summary Report</p>
-                                  <p className="font-medium">{selectedConfig.ci_integration.summary_file}</p>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                  <CardFooter className="flex justify-end">
-                    <Button className="bg-green-600 hover:bg-green-700">
-                      Generate SBOM
-                    </Button>
-                  </CardFooter>
-                </Card>
-              ) : (
-                <Card className="h-full">
-                  <CardContent className="flex items-center justify-center p-12">
-                    <div className="text-center text-gray-500">
-                      <Settings className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                      <h3 className="text-xl font-medium mb-2">No Configuration Selected</h3>
-                      <p className="mb-4">
-                        Select a configuration from the list or create a new one.
-                      </p>
-                      <Button 
-                        variant="outline" 
-                        onClick={startNew}
-                      >
-                        <PlusCircle className="w-4 h-4 mr-2" />
-                        Create New Configuration
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="editor" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                {isCreating ? "Create New Configuration" : "Edit Configuration"}
-              </CardTitle>
-              <CardDescription>
-                Configure the settings for SBOM generation
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="name">Configuration Name</Label>
+      <Card>
+        <CardHeader>
+          <CardTitle>Scan Configuration</CardTitle>
+          <CardDescription>
+            Specify systems and connection details for Graviton compatibility analysis
+          </CardDescription>
+          <Tabs value={scanMode} onValueChange={setScanMode} className="mt-4">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="single">Single System</TabsTrigger>
+              <TabsTrigger value="bulk">Multiple Systems</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="single" className="mt-4 space-y-6">
+              {/* Core Connection Inputs */}
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <Server className="h-5 w-5 text-blue-500" />
+                  <h3 className="text-lg font-medium">Core Connection Inputs</h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="hostname">
+                      Hostname or IP Address <span className="text-red-500">*</span>
+                    </Label>
                     <Input 
-                      id="name" 
-                      value={formValues.name}
-                      onChange={(e) => setFormValues({...formValues, name: e.target.value})}
-                      placeholder="Enter a name for this configuration"
+                      id="hostname" 
+                      placeholder="e.g., server.example.com or 192.168.1.100"
+                      value={hostname}
+                      onChange={(e) => setHostname(e.target.value)}
                     />
                   </div>
                   
-                  <div className="grid gap-2">
-                    <Label htmlFor="source_type">Source Type</Label>
-                    <Select 
-                      value={formValues.source_type}
-                      onValueChange={(value) => setFormValues({...formValues, source_type: value})}
-                    >
-                      <SelectTrigger id="source_type">
-                        <SelectValue placeholder="Select source type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="container_image">Container Image</SelectItem>
-                        <SelectItem value="filesystem">Filesystem</SelectItem>
-                        <SelectItem value="archive">Archive (tar, zip)</SelectItem>
-                        <SelectItem value="oci_registry">OCI Registry</SelectItem>
-                        <SelectItem value="podman">Podman Container</SelectItem>
-                        <SelectItem value="directory">Directory</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="source_path">
-                    {formValues.source_type === 'container_image' ? 'Image Name' :
-                     formValues.source_type === 'oci_registry' ? 'Registry URL' :
-                     'Path'}
-                  </Label>
-                  <Input 
-                    id="source_path"
-                    value={formValues.source_path}
-                    onChange={(e) => setFormValues({...formValues, source_path: e.target.value})}
-                    placeholder={
-                      formValues.source_type === 'container_image' ? 'e.g., nginx:latest' :
-                      formValues.source_type === 'oci_registry' ? 'e.g., registry.example.com/image:tag' :
-                      formValues.source_type === 'filesystem' ? 'e.g., /path/to/filesystem' :
-                      formValues.source_type === 'archive' ? 'e.g., /path/to/archive.tar.gz' :
-                      'e.g., /path/to/source'
-                    }
-                  />
-                </div>
-
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="output_format">Output Format</Label>
-                    <Select 
-                      value={formValues.output_format}
-                      onValueChange={(value) => setFormValues({...formValues, output_format: value})}
-                    >
-                      <SelectTrigger id="output_format">
-                        <SelectValue placeholder="Select output format" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="spdx-json">SPDX JSON</SelectItem>
-                        <SelectItem value="spdx-tag-value">SPDX Tag-Value</SelectItem>
-                        <SelectItem value="cyclonedx-json">CycloneDX JSON</SelectItem>
-                        <SelectItem value="cyclonedx-xml">CycloneDX XML</SelectItem>
-                        <SelectItem value="syft-json">Syft JSON</SelectItem>
-                        <SelectItem value="template">Custom Template</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {formValues.output_format === 'template' && (
-                    <div className="grid gap-2">
-                      <Label htmlFor="template_path">Template Path</Label>
-                      <Input 
-                        id="template_path"
-                        value={formValues.template_path}
-                        onChange={(e) => setFormValues({...formValues, template_path: e.target.value})}
-                        placeholder="Path to template file"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-medium mb-3">Cataloging Options</h3>
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div className="flex items-center justify-between space-x-2">
-                      <div className="flex flex-col">
-                        <Label htmlFor="package_cataloging" className="mb-1.5">Package Cataloging</Label>
-                        <span className="text-xs text-gray-500">Catalog software packages</span>
-                      </div>
-                      <Switch
-                        id="package_cataloging"
-                        checked={formValues.package_cataloging}
-                        onCheckedChange={(checked) => setFormValues({...formValues, package_cataloging: checked})}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between space-x-2">
-                      <div className="flex flex-col">
-                        <Label htmlFor="file_cataloging" className="mb-1.5">File Cataloging</Label>
-                        <span className="text-xs text-gray-500">Catalog file digests</span>
-                      </div>
-                      <Switch
-                        id="file_cataloging"
-                        checked={formValues.file_cataloging}
-                        onCheckedChange={(checked) => setFormValues({...formValues, file_cataloging: checked})}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between space-x-2">
-                      <div className="flex flex-col">
-                        <Label htmlFor="file_contents_cataloging" className="mb-1.5">Content Cataloging</Label>
-                        <span className="text-xs text-gray-500">Catalog file contents</span>
-                      </div>
-                      <Switch
-                        id="file_contents_cataloging"
-                        checked={formValues.file_contents_cataloging}
-                        onCheckedChange={(checked) => setFormValues({...formValues, file_contents_cataloging: checked})}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-medium mb-3">Performance Options</h3>
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <Label htmlFor="performance_profile">Performance Profile</Label>
-                        <Badge className="capitalize">{formValues.performance_profile}</Badge>
-                      </div>
-                      <Select 
-                        value={formValues.performance_profile}
-                        onValueChange={(value) => setFormValues({...formValues, performance_profile: value})}
-                      >
-                        <SelectTrigger id="performance_profile">
-                          <SelectValue placeholder="Select profile" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="fast">Fast (Less accurate)</SelectItem>
-                          <SelectItem value="balanced">Balanced</SelectItem>
-                          <SelectItem value="deep">Deep (Most accurate)</SelectItem>
-                          <SelectItem value="standard">Standard</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex justify-between">
-                        <Label htmlFor="parallelism">Parallelism: {formValues.parallelism} workers</Label>
-                      </div>
-                      <Slider
-                        id="parallelism"
-                        min={1}
-                        max={16}
-                        step={1}
-                        value={[formValues.parallelism]}
-                        onValueChange={(values) => setFormValues({...formValues, parallelism: values[0]})}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex justify-between">
-                    <Label htmlFor="exclude_patterns">Exclude Patterns</Label>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <HelpCircle className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p className="max-w-xs">
-                            Glob patterns to exclude files or directories from scanning.
-                            Examples: "**/*.tmp", "**/node_modules/**"
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                  <div className="flex gap-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="port">Port (default: 22 for SSH)</Label>
                     <Input 
-                      id="exclude_patterns"
-                      value={newExcludePattern}
-                      onChange={(e) => setNewExcludePattern(e.target.value)}
-                      placeholder="e.g., **/node_modules/**"
+                      id="port" 
+                      placeholder="22"
+                      value={port}
+                      onChange={(e) => setPort(e.target.value)}
                     />
-                    <Button 
-                      variant="outline" 
-                      onClick={addExcludePattern}
-                    >
-                      Add
-                    </Button>
                   </div>
-                  {formValues.exclude_patterns && formValues.exclude_patterns.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {formValues.exclude_patterns.map((pattern, index) => (
-                        <Badge 
-                          key={index} 
-                          variant="secondary"
-                          className="flex items-center gap-1"
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="connection-type">Connection Type / Protocol</Label>
+                    <Select value={connectionType} onValueChange={setConnectionType}>
+                      <SelectTrigger id="connection-type">
+                        <SelectValue placeholder="Select protocol" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ssh">SSH</SelectItem>
+                        <SelectItem value="ssh_tunnel" disabled>SSH Tunnel (Coming soon)</SelectItem>
+                        <SelectItem value="winrm" disabled>WinRM (Coming soon)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Authentication Section */}
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <UserCircle className="h-5 w-5 text-indigo-500" />
+                  <h3 className="text-lg font-medium">Authentication</h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="username">Username</Label>
+                    <Input 
+                      id="username" 
+                      placeholder="e.g., admin or root"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="auth-method">Authentication Method</Label>
+                    <Select value={authMethod} onValueChange={setAuthMethod}>
+                      <SelectTrigger id="auth-method">
+                        <SelectValue placeholder="Select method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="password">Password</SelectItem>
+                        <SelectItem value="ssh_key">SSH Private Key</SelectItem>
+                        <SelectItem value="kerberos" disabled>Kerberos (Coming soon)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {authMethod === "password" && (
+                    <div className="space-y-2 col-span-full">
+                      <Label htmlFor="password">Password</Label>
+                      <div className="relative">
+                        <Input 
+                          id="password" 
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Enter password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2"
+                          onClick={() => setShowPassword(!showPassword)}
                         >
-                          {pattern}
-                          <X 
-                            className="h-3 w-3 ml-1 cursor-pointer" 
-                            onClick={() => removeExcludePattern(index)}
-                          />
-                        </Badge>
-                      ))}
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </Button>
+                      </div>
                     </div>
                   )}
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="ci_integration" className="text-sm font-medium">CI/CD Integration</Label>
-                    <Switch
-                      id="ci_integration"
-                      checked={formValues.ci_integration.enabled}
-                      onCheckedChange={(checked) => setFormValues({
-                        ...formValues, 
-                        ci_integration: {
-                          ...formValues.ci_integration,
-                          enabled: checked
-                        }
-                      })}
-                    />
-                  </div>
-
-                  {formValues.ci_integration.enabled && (
-                    <div className="pl-4 border-l-2 border-gray-200 space-y-4 mt-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="fail_on_severity">Fail Pipeline On Severity</Label>
-                        <Select 
-                          value={formValues.ci_integration.fail_on_severity}
-                          onValueChange={(value) => setFormValues({
-                            ...formValues, 
-                            ci_integration: {
-                              ...formValues.ci_integration,
-                              fail_on_severity: value
-                            }
-                          })}
-                        >
-                          <SelectTrigger id="fail_on_severity">
-                            <SelectValue placeholder="Select severity" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="critical">Critical Only</SelectItem>
-                            <SelectItem value="high">High and Above</SelectItem>
-                            <SelectItem value="medium">Medium and Above</SelectItem>
-                            <SelectItem value="low">Low and Above</SelectItem>
-                            <SelectItem value="none">Never Fail</SelectItem>
-                          </SelectContent>
-                        </Select>
+                  
+                  {authMethod === "ssh_key" && (
+                    <div className="space-y-4 col-span-full">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Upload SSH Key File</Label>
+                          <div className="border border-dashed rounded-lg p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center">
+                                <Key className="w-5 h-5 text-blue-400" />
+                              </div>
+                              <div>
+                                {sshKeyFileName ? (
+                                  <p className="font-medium">{sshKeyFileName}</p>
+                                ) : (
+                                  <p className="text-gray-500">Private key file (e.g., id_rsa)</p>
+                                )}
+                              </div>
+                            </div>
+                            <input
+                              type="file"
+                              ref={sshKeyFileRef}
+                              className="hidden"
+                              onChange={handleSshKeyFileChange}
+                            />
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => {
+                                if (sshKeyFileName) {
+                                  setSshKeyFile(null);
+                                  setSshKeyFileName("");
+                                } else {
+                                  sshKeyFileRef.current?.click();
+                                }
+                              }}
+                            >
+                              {sshKeyFileName ? "Remove" : "Browse"}
+                            </Button>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-1 mb-2">
+                            <Label htmlFor="passphrase">Key Passphrase (if needed)</Label>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="h-4 w-4 text-gray-400" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Enter passphrase only if your private key is encrypted</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+                          <Input 
+                            id="passphrase" 
+                            type="password"
+                            placeholder="Leave empty if no passphrase"
+                          />
+                        </div>
                       </div>
-
-                      <div className="grid gap-2">
-                        <Label htmlFor="summary_file">Summary Report Path</Label>
-                        <Input 
-                          id="summary_file"
-                          value={formValues.ci_integration.summary_file}
-                          onChange={(e) => setFormValues({
-                            ...formValues, 
-                            ci_integration: {
-                              ...formValues.ci_integration,
-                              summary_file: e.target.value
-                            }
-                          })}
-                          placeholder="Path for summary report"
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="ssh-key">Or Paste SSH Private Key</Label>
+                        <Textarea 
+                          id="ssh-key" 
+                          placeholder="-----BEGIN RSA PRIVATE KEY-----..."
+                          className="font-mono text-xs h-32"
+                          value={sshKey}
+                          onChange={(e) => setSshKey(e.target.value)}
                         />
                       </div>
                     </div>
                   )}
                 </div>
               </div>
-            </CardContent>
-            <CardFooter className="flex justify-between">
-              <Button 
-                variant="outline" 
-                onClick={cancelEdit}
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Cancel
-              </Button>
-              <Button 
-                onClick={isCreating ? handleCreate : handleUpdate}
-                className="bg-blue-600 hover:bg-blue-700"
-                disabled={!formValues.name || !formValues.source_path}
-              >
-                <Save className="w-4 h-4 mr-2" />
-                {isCreating ? "Create Configuration" : "Update Configuration"}
-              </Button>
-            </CardFooter>
-          </Card>
-        </TabsContent>
-      </Tabs>
+              
+              {/* Scan Configuration */}
+              <Accordion type="single" collapsible defaultValue="scan-config">
+                <AccordionItem value="scan-config">
+                  <AccordionTrigger className="flex items-center gap-2 py-2">
+                    <Workflow className="h-5 w-5 text-green-500" />
+                    <span className="text-lg font-medium">Scan Configuration</span>
+                  </AccordionTrigger>
+                  <AccordionContent className="pt-4">
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-4">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox 
+                              id="package-managers" 
+                              checked={packageManagers}
+                              onCheckedChange={setPackageManagers}
+                            />
+                            <Label htmlFor="package-managers">Scan package managers (apt, yum, etc.)</Label>
+                          </div>
+                          
+                          <div className="flex items-center space-x-2">
+                            <Checkbox 
+                              id="programming-envs" 
+                              checked={programmingEnvs}
+                              onCheckedChange={setProgrammingEnvs}
+                            />
+                            <Label htmlFor="programming-envs">Scan programming environments (Python, Node.js, etc.)</Label>
+                          </div>
+                          
+                          <div className="flex items-center space-x-2">
+                            <Checkbox 
+                              id="application-detection" 
+                              checked={applicationDetection}
+                              onCheckedChange={setApplicationDetection}
+                            />
+                            <Label htmlFor="application-detection">Detect running applications (databases, message queues, etc.)</Label>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-4">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox 
+                              id="system-info" 
+                              checked={systemInfo}
+                              onCheckedChange={setSystemInfo}
+                            />
+                            <Label htmlFor="system-info">Collect system information</Label>
+                          </div>
+                          
+                          <div className="flex items-center space-x-2">
+                            <Checkbox 
+                              id="container-info" 
+                              checked={containerInfo}
+                              onCheckedChange={setContainerInfo}
+                            />
+                            <Label htmlFor="container-info">Scan container images (if available)</Label>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+                
+                {/* Scheduling */}
+                <AccordionItem value="scheduling">
+                  <AccordionTrigger className="flex items-center gap-2 py-2">
+                    <CalendarIcon className="h-5 w-5 text-purple-500" />
+                    <span className="text-lg font-medium">Scheduling</span>
+                  </AccordionTrigger>
+                  <AccordionContent className="pt-4">
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="schedule-switch"
+                          checked={scheduleForLater}
+                          onCheckedChange={setScheduleForLater}
+                        />
+                        <Label htmlFor="schedule-switch">Schedule for later</Label>
+                      </div>
+                      
+                      {scheduleForLater && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                          <div className="space-y-2">
+                            <Label>Date</Label>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  className="w-full justify-start text-left font-normal"
+                                >
+                                  <CalendarIcon className="mr-2 h-4 w-4" />
+                                  {scheduleDate ? format(scheduleDate, "PPP") : "Select date"}
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-auto p-0">
+                                <Calendar
+                                  mode="single"
+                                  selected={scheduleDate}
+                                  onSelect={setScheduleDate}
+                                  initialFocus
+                                />
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <Label htmlFor="time">Time</Label>
+                            <Input
+                              id="time"
+                              type="time"
+                              value={scheduleTime}
+                              onChange={(e) => setScheduleTime(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </TabsContent>
+            
+            <TabsContent value="bulk" className="mt-4 space-y-6">
+              <div>
+                <div className="flex justify-between mb-2">
+                  <Label className="text-base font-medium">Target Systems</Label>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-6 p-1">
+                          <Info className="h-4 w-4 text-gray-500" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs">
+                        <p>Enter hostnames or IP addresses, one per line or comma-separated</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                <Textarea
+                  placeholder="Enter hostnames or IP addresses...
+Example:
+server1.example.com
+192.168.1.100
+test-server, dev-server"
+                  value={targetSystems}
+                  onChange={(e) => setTargetSystems(e.target.value)}
+                  className="h-32"
+                />
+              </div>
+              
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <span className="border-t border-gray-200 flex-grow"></span>
+                <span>OR</span>
+                <span className="border-t border-gray-200 flex-grow"></span>
+              </div>
+              
+              <div>
+                <Label className="text-base font-medium mb-2 block">Upload CSV File</Label>
+                <div className="border border-dashed rounded-lg p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center">
+                      <FileUp className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <div>
+                      {fileName ? (
+                        <p className="font-medium">{fileName}</p>
+                      ) : (
+                        <p className="text-gray-500">CSV file with hostnames or IP addresses</p>
+                      )}
+                      <p className="text-xs text-gray-400">
+                        Must include columns for hostname or ip_address
+                      </p>
+                    </div>
+                  </div>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    accept=".csv"
+                    onChange={handleFileChange}
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      if (fileName) {
+                        setFile(null);
+                        setFileName("");
+                      } else {
+                        fileInputRef.current?.click();
+                      }
+                    }}
+                  >
+                    {fileName ? "Remove" : "Browse"}
+                  </Button>
+                </div>
+                
+                <div className="mt-6">
+                  <Alert className="bg-blue-50 border-blue-100">
+                    <InfoCircle className="h-4 w-4 text-blue-500" />
+                    <AlertDescription>
+                      For bulk scanning, default authentication will be used. For systems requiring different credentials, please scan them individually.
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+          
+          {scanError && (
+            <Alert variant="destructive" className="mt-6">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{scanError}</AlertDescription>
+            </Alert>
+          )}
+        </CardHeader>
+        
+        <CardFooter className="flex flex-wrap gap-3">
+          <Button variant="outline" onClick={() => navigate(createPageUrl("Dashboard"))}>
+            Cancel
+          </Button>
+          
+          {scanMode === "single" && (
+            <Button 
+              variant="outline" 
+              className="border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
+              onClick={handleTestConnection}
+            >
+              <ShieldCheck className="w-4 h-4 mr-2" />
+              Test Connection
+            </Button>
+          )}
+          
+          <Button 
+            onClick={startScan} 
+            className="bg-blue-600 hover:bg-blue-700 ml-auto"
+            disabled={scanMode === "single" ? !hostname : (!targetSystems.trim() && !file)}
+          >
+            <Terminal className="w-4 h-4 mr-2" />
+            {scheduleForLater ? "Schedule Scan" : "Start Scanning"}
+          </Button>
+        </CardFooter>
+      </Card>
     </div>
   );
 }

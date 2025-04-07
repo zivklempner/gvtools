@@ -16,6 +16,16 @@ import GravitonCompatibility from "./GravitonCompatibility";
 
 import SystemsOverview from "./SystemsOverview";
 
+import NewScan from "./NewScan";
+
+import Projects from "./Projects";
+
+import BulkScan from "./BulkScan";
+
+import LocalScan from "./LocalScan";
+
+import ApplicationsOverview from "./ApplicationsOverview";
+
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 
 const PAGES = {
@@ -35,6 +45,16 @@ const PAGES = {
     GravitonCompatibility: GravitonCompatibility,
     
     SystemsOverview: SystemsOverview,
+    
+    NewScan: NewScan,
+    
+    Projects: Projects,
+    
+    BulkScan: BulkScan,
+    
+    LocalScan: LocalScan,
+    
+    ApplicationsOverview: ApplicationsOverview,
     
 }
 
@@ -78,6 +98,16 @@ function PagesContent() {
                 <Route path="/GravitonCompatibility" element={<GravitonCompatibility />} />
                 
                 <Route path="/SystemsOverview" element={<SystemsOverview />} />
+                
+                <Route path="/NewScan" element={<NewScan />} />
+                
+                <Route path="/Projects" element={<Projects />} />
+                
+                <Route path="/BulkScan" element={<BulkScan />} />
+                
+                <Route path="/LocalScan" element={<LocalScan />} />
+                
+                <Route path="/ApplicationsOverview" element={<ApplicationsOverview />} />
                 
             </Routes>
         </Layout>
