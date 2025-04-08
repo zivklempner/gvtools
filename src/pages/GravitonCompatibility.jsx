@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { 
   CheckCircle2, XCircle, AlertCircle, Info, 
   HelpCircle, Download, ArrowUpCircle, Server, 
-  FileText, FileImage, FileSpreadsheet, Trash2
+  FileText, FileImage, FileSpreadsheet, Trash2, Package
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
 import {
@@ -29,6 +29,8 @@ import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from "@/utils";
 
 import CompatibilityBadge from '../components/graviton/CompatibilityBadge';
+import { ApplicationDetection } from '@/api/entities';
+import ApplicationAnalyzer from '@/components/scanner/ApplicationAnalyzer';
 
 import {
   AlertDialog,
@@ -51,7 +53,8 @@ export default function GravitonCompatibilityPage() {
   const [exportType, setExportType] = useState("");
   const [isLoadingExternalData, setIsLoadingExternalData] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [navigate, setNavigate] = useState(() => useNavigate());
+  const navigate = useNavigate();
+  const [applications, setApplications] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -60,26 +63,25 @@ export default function GravitonCompatibilityPage() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      // Get scanId from URL parameters
       const urlParams = new URLSearchParams(window.location.search);
       const scanId = urlParams.get('scanId') || sessionStorage.getItem('selectedSystemId');
       
-      const [scanResults, compatData] = await Promise.all([
+      const [scanResults, compatData, appsData] = await Promise.all([
         ScanResult.list('-scan_date'),
-        GravitonCompatibility.list()
+        GravitonCompatibility.list(),
+        scanId ? ApplicationDetection.filter({ scan_id: scanId }) : []
       ]);
       
-      setScans(scanResults);
-      setCompatibilityData(compatData);
+      setScans(Array.isArray(scanResults) ? scanResults : []);
+      setCompatibilityData(Array.isArray(compatData) ? compatData : []);
+      setApplications(Array.isArray(appsData) ? appsData : []);
       
-      // Try to find the scan with the provided ID
-      if (scanId) {
+      if (scanId && scanResults.length > 0) {
         const scan = scanResults.find(s => s.id === scanId);
         if (scan) {
           setSelectedScan(scan);
-          // Store the selected scan ID in case we need it later
           sessionStorage.setItem('selectedSystemId', scanId);
-        } else if (scanResults.length > 0) {
+        } else {
           setSelectedScan(scanResults[0]);
         }
       } else if (scanResults.length > 0) {
@@ -101,45 +103,51 @@ export default function GravitonCompatibilityPage() {
     // Add operating system
     if (selectedScan.os_info) {
       components.push({
-        name: selectedScan.os_info.distribution || selectedScan.os_info.name,
-        version: selectedScan.os_info.version,
+        name: selectedScan.os_info.distribution || selectedScan.os_info.name || 'Unknown OS',
+        version: selectedScan.os_info.version || 'Unknown version',
         type: 'operating_system'
       });
     }
     
     // Add packages from package managers
-    if (selectedScan.package_managers) {
+    if (selectedScan.package_managers && Array.isArray(selectedScan.package_managers)) {
       selectedScan.package_managers.forEach(pm => {
-        if (pm.packages) {
+        if (pm && pm.packages && Array.isArray(pm.packages)) {
           pm.packages.forEach(pkg => {
-            components.push({
-              name: pkg.name,
-              version: pkg.version,
-              type: 'software_package'
-            });
+            if (pkg && pkg.name) {
+              components.push({
+                name: pkg.name,
+                version: pkg.version || 'Unknown version',
+                type: 'software_package'
+              });
+            }
           });
         }
       });
     }
     
     // Add programming environments
-    if (selectedScan.programming_environments) {
+    if (selectedScan.programming_environments && Array.isArray(selectedScan.programming_environments)) {
       selectedScan.programming_environments.forEach(env => {
-        // Add runtime
-        components.push({
-          name: env.runtime.name,
-          version: env.runtime.version,
-          type: 'programming_language'
-        });
+        // Add runtime if it exists
+        if (env && env.runtime && env.runtime.name) {
+          components.push({
+            name: env.runtime.name,
+            version: env.runtime.version || 'Unknown version',
+            type: 'programming_language'
+          });
+        }
         
-        // Add dependencies
-        if (env.dependencies) {
+        // Add dependencies if they exist
+        if (env && env.dependencies && Array.isArray(env.dependencies)) {
           env.dependencies.forEach(dep => {
-            components.push({
-              name: dep.name,
-              version: dep.version,
-              type: 'software_package'
-            });
+            if (dep && dep.name) {
+              components.push({
+                name: dep.name,
+                version: dep.version || 'Unknown version',
+                type: 'software_package'
+              });
+            }
           });
         }
       });
@@ -245,7 +253,7 @@ export default function GravitonCompatibilityPage() {
         }
         
         const updatedCompatData = await GravitonCompatibility.list();
-        setCompatibilityData(updatedCompatData);
+        setCompatibilityData(Array.isArray(updatedCompatData) ? updatedCompatData : []);
         
         alert(`Added compatibility information for ${newCompatibilityData.length} components`);
       } else {
@@ -480,12 +488,12 @@ export default function GravitonCompatibilityPage() {
                     >
                       <div className="flex items-center gap-2">
                         <Server className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-                        <p className="font-medium">{scan.hostname}</p>
+                        <p className="font-medium">{scan.hostname || 'Unknown System'}</p>
                       </div>
                       {scan.os_info && (
                         <div className="flex items-center mt-1">
                           <Badge variant="outline" className="text-xs">
-                            {scan.os_info.distribution} {scan.os_info.version}
+                            {scan.os_info.distribution || scan.os_info.name || 'Unknown OS'} {scan.os_info.version || ''}
                           </Badge>
                         </div>
                       )}
@@ -504,7 +512,7 @@ export default function GravitonCompatibilityPage() {
                     <CardHeader>
                       <CardTitle>Compatibility Overview</CardTitle>
                       <CardDescription>
-                        AWS Graviton compatibility for {selectedScan.hostname}
+                        AWS Graviton compatibility for {selectedScan.hostname || 'Unknown System'}
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -512,8 +520,7 @@ export default function GravitonCompatibilityPage() {
                         <div className="flex items-center p-4 bg-green-50 rounded-lg">
                           <CheckCircle2 className="h-10 w-10 text-green-500 mr-4" />
                           <div>
-                            <p className="text
--sm font-medium text-green-800">Compatible</p>
+                            <p className="text-sm font-medium text-green-800">Compatible</p>
                             <p className="text-2xl font-bold text-green-900">{summary.compatible}</p>
                             <p className="text-sm text-green-700">{summary.total > 0 ? Math.round((summary.compatible / summary.total) * 100) : 0}%</p>
                           </div>
@@ -570,28 +577,34 @@ export default function GravitonCompatibilityPage() {
                         <CardTitle>Component Distribution</CardTitle>
                       </CardHeader>
                       <CardContent className="h-[300px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={pieChartData}
-                              cx="50%"
-                              cy="50%"
-                              labelLine={false}
-                              outerRadius={80}
-                              fill="#8884d8"
-                              dataKey="value"
-                              label={({name, percent}) => 
-                                percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : ''
-                              }
-                            >
-                              {pieChartData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                            <Legend />
-                          </PieChart>
-                        </ResponsiveContainer>
+                        {pieChartData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={pieChartData}
+                                cx="50%"
+                                cy="50%"
+                                labelLine={false}
+                                outerRadius={80}
+                                fill="#8884d8"
+                                dataKey="value"
+                                label={({name, percent}) => 
+                                  percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : ''
+                                }
+                              >
+                                {pieChartData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip />
+                              <Legend />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="h-full flex items-center justify-center">
+                            <p className="text-gray-500">No data available</p>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
 
@@ -601,18 +614,24 @@ export default function GravitonCompatibilityPage() {
                         <CardTitle>By Component Type</CardTitle>
                       </CardHeader>
                       <CardContent className="h-[300px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={barChartData}>
-                            <XAxis dataKey="name" />
-                            <YAxis />
-                            <Tooltip />
-                            <Legend />
-                            <Bar dataKey="Compatible" stackId="a" fill="#22c55e" />
-                            <Bar dataKey="Not Compatible" stackId="a" fill="#ef4444" />
-                            <Bar dataKey="Partial" stackId="a" fill="#f59e0b" />
-                            <Bar dataKey="Unknown" stackId="a" fill="#6b7280" />
-                          </BarChart>
-                        </ResponsiveContainer>
+                        {barChartData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={barChartData}>
+                              <XAxis dataKey="name" />
+                              <YAxis />
+                              <Tooltip />
+                              <Legend />
+                              <Bar dataKey="Compatible" stackId="a" fill="#22c55e" />
+                              <Bar dataKey="Not Compatible" stackId="a" fill="#ef4444" />
+                              <Bar dataKey="Partial" stackId="a" fill="#f59e0b" />
+                              <Bar dataKey="Unknown" stackId="a" fill="#6b7280" />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="h-full flex items-center justify-center">
+                            <p className="text-gray-500">No data available</p>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   </div>
@@ -641,6 +660,26 @@ export default function GravitonCompatibilityPage() {
                       />
                     </CardContent>
                   </Card>
+
+                  {/* Add this after the Component Compatibility Details card */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Detected Applications</CardTitle>
+                      <CardDescription>
+                        Applications and services detected on the system
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {applications.length > 0 ? (
+                        <ApplicationAnalyzer applications={applications} />
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Package className="h-12 w-12 mx-auto mb-4 opacity-40" />
+                          <p>No applications detected</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
                 </div>
               ) : (
                 <Card className="h-[300px] flex items-center justify-center text-gray-500">
@@ -662,7 +701,7 @@ export default function GravitonCompatibilityPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete System</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the system "{selectedScan?.hostname}"? This action cannot be undone.
+              Are you sure you want to delete the system "{selectedScan?.hostname || 'Unknown System'}"? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
