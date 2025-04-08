@@ -20,7 +20,7 @@ import {
   FileUp, ArrowLeft, Upload, Check, AlertCircle, Loader2, File, Server, CheckCircle, Trash2, Plus
 } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
-import { createPageUrl } from "@/utils/navigation";
+import { createPageUrl } from "@/utils";
 import { format as dateFormat } from "date-fns";
 import {
   Table,
