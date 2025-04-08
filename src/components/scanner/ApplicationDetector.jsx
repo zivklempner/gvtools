@@ -1,3 +1,4 @@
+import React from 'react';
 import { ApplicationDetection } from '@/api/entities';
 
 /**

@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
+import { User } from '@/api/entities';
 import { ScanResult } from '@/api/entities';
 import { GravitonCompatibility } from '@/api/entities';
-import { CompatibilityTable } from '@/components/graviton/CompatibilityTable';
+import CompatibilityTable from '@/components/graviton/CompatibilityTable';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +28,6 @@ import { InvokeLLM } from "@/api/integrations";
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from "@/utils";
 
-
 import CompatibilityBadge from '../components/graviton/CompatibilityBadge';
 
 import {
@@ -51,7 +51,7 @@ export default function GravitonCompatibilityPage() {
   const [exportType, setExportType] = useState("");
   const [isLoadingExternalData, setIsLoadingExternalData] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const navigate = useNavigate();
+  const [navigate, setNavigate] = useState(() => useNavigate());
 
   useEffect(() => {
     loadData();

@@ -30,6 +30,8 @@ import DockerInstructions from "./DockerInstructions";
 
 import GitHubInstructions from "./GitHubInstructions";
 
+import Layout from "./Layout";
+
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 
 const PAGES = {
@@ -63,6 +65,8 @@ const PAGES = {
     DockerInstructions: DockerInstructions,
     
     GitHubInstructions: GitHubInstructions,
+    
+    Layout: Layout,
     
 }
 
@@ -120,6 +124,8 @@ function PagesContent() {
                 <Route path="/DockerInstructions" element={<DockerInstructions />} />
                 
                 <Route path="/GitHubInstructions" element={<GitHubInstructions />} />
+                
+                <Route path="/Layout" element={<Layout />} />
                 
             </Routes>
         </Layout>
