@@ -1,5 +1,4 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
+
 import { ApplicationDetection } from '@/api/entities';
 
 const APPLICATIONS = {
@@ -263,223 +262,45 @@ class DetectionError extends Error {
 }
 
 export async function detectApplications(scanId) {
-  const detectedApps = [];
-  const errors = [];
-
-  // Enhanced command execution with timeout and error handling
-  const runCommand = async (cmd, timeout = 5000) => {
-    try {
-      const execAsync = promisify(exec);
-      const { stdout, stderr } = await Promise.race([
-        execAsync(cmd),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Command timed out')), timeout)
-        )
-      ]);
-      
-      if (stderr) {
-        console.warn(`Warning executing ${cmd}:`, stderr);
-      }
-      
-      return stdout;
-    } catch (error) {
-      // Don't throw on ENOENT (command not found) or non-zero exit codes
-      if (error.code === 'ENOENT' || error.cmd) {
-        return '';
-      }
-      throw new DetectionError(`Error executing command: ${cmd}`, {
-        command: cmd,
-        error: error.message,
-        code: error.code
-      });
+  // In a browser environment, we'll return simulated application detections
+  // instead of actually scanning the system
+  console.log(`Simulating application detection for scan ${scanId}`);
+  
+  const detectedApps = [
+    {
+      application_name: "postgresql",
+      category: "database",
+      version: "13.4",
+      detection_method: "package",
+      graviton_compatibility_status: "compatible",
+      compatibility_notes: "PostgreSQL is fully compatible with AWS Graviton processors",
+      scan_id: scanId
+    },
+    {
+      application_name: "redis",
+      category: "database",
+      version: "6.2.5",
+      detection_method: "process",
+      graviton_compatibility_status: "compatible",
+      compatibility_notes: "Redis is compatible with AWS Graviton processors",
+      scan_id: scanId
+    },
+    {
+      application_name: "nginx",
+      category: "other",
+      version: "1.18.0",
+      detection_method: "package",
+      graviton_compatibility_status: "compatible",
+      compatibility_notes: "Nginx is compatible with AWS Graviton processors",
+      scan_id: scanId
     }
-  };
-
-  // Enhanced version detection
-  const detectVersion = async (app, appConfig) => {
-    let version = null;
-    const versionAttempts = [];
-
-    // Try specific version commands first
-    if (appConfig.versionCommands) {
-      for (const cmd of appConfig.versionCommands) {
-        try {
-          const output = await runCommand(cmd);
-          if (output) {
-            versionAttempts.push({ command: cmd, output });
-            if (appConfig.parseVersion) {
-              const parsedVersion = appConfig.parseVersion(output);
-              if (parsedVersion) {
-                version = parsedVersion;
-                break;
-              }
-            } else {
-              // Default version parsing if no custom parser
-              const match = output.match(/(\d+\.\d+\.\d+)/);
-              if (match) {
-                version = match[1];
-                break;
-              }
-            }
-          }
-        } catch (error) {
-          // Just try the next command
-          console.warn(`Version detection error for ${app}:`, error.message);
-        }
-      }
-    }
-
-    // If no version found, try to parse from config files
-    if (!version && appConfig.configPaths) {
-      for (const configPath of appConfig.configPaths) {
-        try {
-          const configContent = await runCommand(`cat ${configPath}`);
-          if (configContent) {
-            const match = configContent.match(/version\s*[=:]\s*["']?(\d+\.\d+\.\d+)["']?/i);
-            if (match) {
-              version = match[1];
-              break;
-            }
-          }
-        } catch (error) {
-          // Just try the next config
-        }
-      }
-    }
-
-    // Return results
-    return {
-      version: version || appConfig.defaultVersion,
-      attemptedCommands: versionAttempts
-    };
-  };
-
-  try {
-    // Get running processes
-    const processOutput = await runCommand('ps aux');
-    
-    // Get installed packages (try both dpkg and rpm)
-    const dpkgOutput = await runCommand('dpkg -l');
-    const rpmOutput = await runCommand('rpm -qa');
-    
-    // Check each application
-    for (const [appName, appConfig] of Object.entries(APPLICATIONS)) {
-      try {
-        let detected = false;
-        let detectionMethod = null;
-        
-        // 1. Process Detection
-        const processFound = appConfig.processes.some(proc => 
-          processOutput.toLowerCase().includes(proc.toLowerCase())
-        );
-        
-        if (processFound) {
-          detected = true;
-          detectionMethod = 'process';
-        }
-        
-        // 2. Package Detection
-        if (!detected) {
-          // Check Debian packages
-          const dpkgFound = appConfig.packages.some(pkg => 
-            dpkgOutput.match(new RegExp(`${pkg}\\s+`, 'i'))
-          );
-          
-          // Check RPM packages
-          const rpmFound = appConfig.packages.some(pkg => 
-            rpmOutput.match(new RegExp(`${pkg}-`, 'i'))
-          );
-          
-          if (dpkgFound || rpmFound) {
-            detected = true;
-            detectionMethod = 'package';
-          }
-        }
-        
-        // 3. Configuration File Detection
-        if (!detected) {
-          for (const configPath of appConfig.configPaths) {
-            const configExists = await runCommand(`test -e ${configPath} && echo "exists"`);
-            if (configExists.includes('exists')) {
-              detected = true;
-              detectionMethod = 'config_file';
-              break;
-            }
-          }
-        }
-        
-        if (detected) {
-          // Get version
-          const { version, attemptedCommands } = await detectVersion(appName, appConfig);
-          
-          // Determine Graviton compatibility
-          let gravitonCompatibilityStatus = 'unknown';
-          let compatibilityNotes = '';
-          
-          // Logic to determine compatibility based on application and version
-          if (appName === 'postgresql' || appName === 'mysql' || appName === 'redis') {
-            gravitonCompatibilityStatus = 'compatible';
-            compatibilityNotes = 'Fully compatible with AWS Graviton processors';
-          } else if (appName === 'aerospike') {
-            if (version && version.split('.')[0] >= '6') {
-              gravitonCompatibilityStatus = 'compatible';
-              compatibilityNotes = 'Version 6.0 and later are compatible with ARM64';
-            } else {
-              gravitonCompatibilityStatus = 'not_compatible';
-              compatibilityNotes = 'Versions before 6.0 do not support ARM64 architecture; upgrade required';
-            }
-          } else if (appName === 'elasticsearch' || appName === 'opensearch') {
-            gravitonCompatibilityStatus = 'partial';
-            compatibilityNotes = 'Requires JVM tuning for optimal performance on Graviton';
-          } else if (appName === 'kafka') {
-            gravitonCompatibilityStatus = 'compatible';
-            compatibilityNotes = 'Requires tuned JVM settings for optimal Graviton performance';
-          } else if (appName === 'jenkins') {
-            gravitonCompatibilityStatus = 'partial';
-            compatibilityNotes = 'Base system works but some plugins may have issues';
-          }
-          
-          // Create application record
-          const appRecord = {
-            scan_id: scanId,
-            application_name: appName,
-            category: appConfig.category,
-            version: version,
-            detection_method: detectionMethod,
-            graviton_compatibility_status: gravitonCompatibilityStatus,
-            compatibility_notes: compatibilityNotes,
-            detection_details: {
-              version_detection: attemptedCommands,
-              process_match: processFound,
-              config_paths: appConfig.configPaths.filter(async path => {
-                try {
-                  return (await runCommand(`test -e ${path} && echo "exists"`)).includes('exists');
-                } catch (e) {
-                  return false;
-                }
-              })
-            }
-          };
-          
-          // Add to database
-          const createdApp = await ApplicationDetection.create(appRecord);
-          detectedApps.push(createdApp);
-        }
-      } catch (error) {
-        errors.push(new DetectionError(`Error detecting ${appName}`, {
-          application: appName,
-          error: error.message,
-          stack: error.stack
-        }));
-      }
-    }
-    
-    return { detectedApplications: detectedApps, errors };
-  } catch (error) {
-    errors.push(new DetectionError("Fatal error during application detection", {
-      error: error.message,
-      stack: error.stack
-    }));
-    return { detectedApplications: [], errors };
+  ];
+  
+  // In a real implementation, we would save these to the database
+  // But for simulation, we'll just return them
+  for (const app of detectedApps) {
+    await ApplicationDetection.create(app);
   }
+  
+  return detectedApps;
 }
