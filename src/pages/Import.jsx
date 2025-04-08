@@ -2,7 +2,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { ScanResult } from '@/api/entities';
 import { ImportedScan } from '@/api/entities';
-import { ExtractDataFromUploadedFile, UploadFile } from "@/api/integrations";
+import { UploadFile } from "@/api/integrations";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,7 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-export default function Import() {
+export default function ImportPage() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const [files, setFiles] = useState([]);
