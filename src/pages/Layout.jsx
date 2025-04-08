@@ -26,7 +26,8 @@ import {
   Moon, 
   Terminal, 
   Folder,
-  Database
+  Database,
+  Github
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -87,7 +88,9 @@ export default function Layout({ children, currentPageName }) {
     { name: "System Analysis", icon: <Terminal className="w-5 h-5" />, path: "SystemsOverview", requiresProject: true },
     { name: "Applications", icon: <Database className="w-5 h-5" />, path: "ApplicationsOverview", requiresProject: true },
     { name: "Graviton Compatibility", icon: <Cpu className="w-5 h-5" />, path: "GravitonCompatibility", requiresProject: true },
-    { name: "Documentation", icon: <BookOpen className="w-5 h-5" />, path: "Documentation" }
+    { name: "Documentation", icon: <BookOpen className="w-5 h-5" />, path: "Documentation" },
+    { name: "Docker Setup", icon: <Container className="w-5 h-5" />, path: "DockerInstructions" },
+    { name: "GitHub Setup", icon: <Github className="w-5 h-5" />, path: "GitHubInstructions" }
   ];
 
   return (

@@ -26,6 +26,10 @@ import LocalScan from "./LocalScan";
 
 import ApplicationsOverview from "./ApplicationsOverview";
 
+import DockerInstructions from "./DockerInstructions";
+
+import GitHubInstructions from "./GitHubInstructions";
+
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 
 const PAGES = {
@@ -55,6 +59,10 @@ const PAGES = {
     LocalScan: LocalScan,
     
     ApplicationsOverview: ApplicationsOverview,
+    
+    DockerInstructions: DockerInstructions,
+    
+    GitHubInstructions: GitHubInstructions,
     
 }
 
@@ -108,6 +116,10 @@ function PagesContent() {
                 <Route path="/LocalScan" element={<LocalScan />} />
                 
                 <Route path="/ApplicationsOverview" element={<ApplicationsOverview />} />
+                
+                <Route path="/DockerInstructions" element={<DockerInstructions />} />
+                
+                <Route path="/GitHubInstructions" element={<GitHubInstructions />} />
                 
             </Routes>
         </Layout>
